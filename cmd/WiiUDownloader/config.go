@@ -18,6 +18,7 @@ type Config struct {
 	DarkMode                bool   `koanf:"darkMode"`
 	DecryptContents         bool   `koanf:"decryptContents"`
 	DeleteEncryptedContents bool   `koanf:"deleteEncryptedContents"`
+	DecryptOutputPath       string `koanf:"decryptOutputPath"`
 	ContinueOnError         bool   `koanf:"continueOnError"`
 	SuggestRelatedContent   bool   `koanf:"suggestRelatedContent"`
 	SelectedRegion          uint8  `koanf:"selectedRegion"`
@@ -147,8 +148,33 @@ func (c *Config) Save() error {
 func (c *Config) SetValuesFromConfig(newK *koanf.Koanf) error {
 	c.saveMutex.Lock()
 	defer c.saveMutex.Unlock()
+
+	darkModeDefault := c.DarkMode
+	selectedRegionDefault := c.SelectedRegion
+	continueOnErrorDefault := c.ContinueOnError
+	getSizeOnQueueDefault := c.GetSizeOnQueue
+
 	if err := newK.Unmarshal("", c); err != nil {
 		return err
+	}
+
+	// Validation: Ensure Region is within bounds (example)
+	if c.SelectedRegion > 7 { // Assuming bitmask 0-7
+		log.Printf("Warning: invalid region %d, resetting to default", c.SelectedRegion)
+		c.SelectedRegion = selectedRegionDefault
+	}
+
+	if !newK.Exists("darkMode") {
+		c.DarkMode = darkModeDefault
+	}
+	if !newK.Exists("selectedRegion") {
+		c.SelectedRegion = selectedRegionDefault
+	}
+	if !newK.Exists("continueOnError") {
+		c.ContinueOnError = continueOnErrorDefault
+	}
+	if !newK.Exists("getSizeOnQueue") {
+		c.GetSizeOnQueue = getSizeOnQueueDefault
 	}
 	if !newK.Exists("suggestRelatedContent") {
 		c.SuggestRelatedContent = true

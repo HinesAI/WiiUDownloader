@@ -116,6 +116,7 @@ func NewMainWindow(entries []wiiudownloader.TitleEntry, client *http.Client, con
 	searchEntry.SetHExpand(false)
 	searchEntry.SetHAlign(gtk.ALIGN_END)
 	searchEntry.SetWidthChars(SEARCH_ENTRY_WIDTH_CHARS)
+	searchEntry.SetIconFromIconName(gtk.ENTRY_ICON_PRIMARY, "edit-find-symbolic")
 	SetupEntryAccessibility(searchEntry, "Search titles", "Enter a game title or title ID to search. You can use the category buttons above to filter by type.")
 
 	queuePane, err := NewQueuePane()
@@ -141,6 +142,7 @@ func NewMainWindow(entries []wiiudownloader.TitleEntry, client *http.Client, con
 	}
 
 	queuePane.updateFunc = mainWindow.updateTitlesInQueue
+	queuePane.SetSetVersionRequested(mainWindow.onSetVersionRequested)
 
 	mainWindow.applyConfig(config)
 	applyStyling()
@@ -349,8 +351,6 @@ func (mw *MainWindow) BuildUI() {
 		return mw.toggleQueueFromKeyboard()
 	})
 	mw.treeView.Connect("cursor-changed", mw.onTreeCursorChanged)
-	mw.ensureTreeViewCursor()
-	mw.window.SetFocusChild(mw.treeView.ToWidget())
 
 	mainvBox, err := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 6)
 	if err != nil {
@@ -590,14 +590,13 @@ func (mw *MainWindow) BuildUI() {
 
 	mainvBox.PackStart(contentPaned, true, true, 0)
 
-	bottomhBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+	bottomhBox, err := gtk.ActionBarNew()
 	if err != nil {
-		log.Fatalln("Unable to create box:", err)
+		log.Fatalln("Unable to create action bar:", err)
 	}
 
 	mw.downloadQueueButton = mw.queuePane.downloadButton
 	mw.downloadQueueButton.SetCanDefault(true)
-	mw.downloadQueueButton.GrabDefault()
 	SetupButtonAccessibility(mw.downloadQueueButton, "Start downloading all titles in your queue")
 
 	mw.decryptContentsCheckbox, err = gtk.CheckButtonNewWithLabel("Decrypt contents")
@@ -634,7 +633,7 @@ func (mw *MainWindow) BuildUI() {
 	checkboxvBox.PackStart(mw.decryptContentsCheckbox, false, false, 0)
 	checkboxvBox.PackEnd(mw.deleteEncryptedContentsCheckbox, false, false, 0)
 
-	bottomhBox.PackStart(checkboxvBox, false, false, 0)
+	bottomhBox.PackStart(checkboxvBox)
 
 	japanButton, err := gtk.CheckButtonNewWithLabel("Japan")
 	if err != nil {
@@ -644,7 +643,7 @@ func (mw *MainWindow) BuildUI() {
 	mw.japanRegionToggleHandle = japanButton.Connect("toggled", func() {
 		mw.onRegionChange(japanButton, wiiudownloader.MCP_REGION_JAPAN)
 	})
-	bottomhBox.PackEnd(japanButton, false, false, 0)
+	bottomhBox.PackEnd(japanButton)
 
 	usaButton, err := gtk.CheckButtonNewWithLabel("USA")
 	if err != nil {
@@ -654,7 +653,7 @@ func (mw *MainWindow) BuildUI() {
 	mw.usaRegionToggleHandle = usaButton.Connect("toggled", func() {
 		mw.onRegionChange(usaButton, wiiudownloader.MCP_REGION_USA)
 	})
-	bottomhBox.PackEnd(usaButton, false, false, 0)
+	bottomhBox.PackEnd(usaButton)
 
 	europeButton, err := gtk.CheckButtonNewWithLabel("Europe")
 	if err != nil {
@@ -664,7 +663,7 @@ func (mw *MainWindow) BuildUI() {
 	mw.europeRegionToggleHandle = europeButton.Connect("toggled", func() {
 		mw.onRegionChange(europeButton, wiiudownloader.MCP_REGION_EUROPE)
 	})
-	bottomhBox.PackEnd(europeButton, false, false, 0)
+	bottomhBox.PackEnd(europeButton)
 	mw.syncRegionCheckboxes()
 
 	mainvBox.PackEnd(bottomhBox, false, false, 0)
@@ -673,10 +672,6 @@ func (mw *MainWindow) BuildUI() {
 	if mw.donationBar != nil {
 		mainvBox.PackEnd(mw.donationBar, false, false, 0)
 	}
-
-	bottomhBox.SetSizeRequest(DOWNLOAD_PANE_MIN_WIDTH, -1)
-
-	mw.queuePane.GetContainer().SetSizeRequest(QUEUE_PANE_MIN_WIDTH, -1)
 
 	splitPane, err := gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
 	if err != nil {
@@ -694,6 +689,12 @@ func (mw *MainWindow) BuildUI() {
 
 	splitPane.SetPosition(280) // Set default width for QueuePane
 	splitPane.ShowAll()
+}
+
+func (mw *MainWindow) PostShowInit() {
+	mw.ensureTreeViewCursor()
+	mw.window.SetFocusChild(mw.treeView.ToWidget())
+	mw.downloadQueueButton.GrabDefault()
 	mw.onTreeCursorChanged()
 }
 
@@ -868,7 +869,15 @@ func shouldShowQueueErrorSummary(runErr error, errors []DownloadError) bool {
 }
 
 func (mw *MainWindow) onDecryptContentsMenuItemClicked(selectedPath string) error {
-	err := wiiudownloader.DecryptContents(selectedPath, mw.progressWindow, false)
+	config, loadErr := loadConfig()
+	if loadErr != nil {
+		return loadErr
+	}
+	decryptOut := ""
+	if config.DecryptOutputPath != "" {
+		decryptOut = filepath.Join(config.DecryptOutputPath, filepath.Base(selectedPath))
+	}
+	err := wiiudownloader.DecryptContents(selectedPath, mw.progressWindow, false, decryptOut)
 
 	uiIdleAdd(func() {
 		mw.progressWindow.Window.Hide()
@@ -881,7 +890,7 @@ func (mw *MainWindow) onDecryptContentsMenuItemClicked(selectedPath string) erro
 		if len(errors) > 0 && config.ContinueOnError {
 			mw.showErrorsDialog(errors)
 		} else if len(errors) == 0 {
-			mw.showSuccessDialog(1, selectedPath)
+			mw.showSuccessDialog(1, selectedPath, decryptOut)
 		}
 	})
 	return err
@@ -910,15 +919,30 @@ func (mw *MainWindow) setupDonationBar() {
 	bar.PackStart(label, true, true, 0)
 	mw.donationLabel = label
 
-	button, err := gtk.ButtonNewWithLabel("Support Me")
+	button, err := gtk.ButtonNew()
 	if err != nil {
 		log.Println("Unable to create button:", err)
 	} else {
 		addStyleClass(button.GetStyleContext, "kofi-btn")
+
+		kofiIcon, _ := gtk.ImageNewFromIconName(supportMeIconName(), gtk.ICON_SIZE_BUTTON)
+		kofiLabel, _ := gtk.LabelNew("Buy me a coffee")
+		kofiBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+		kofiBtnBox.PackStart(kofiIcon, false, false, 0)
+		kofiBtnBox.PackStart(kofiLabel, false, false, 0)
+		button.Add(kofiBtnBox)
+
 		button.Connect("clicked", func() {
 			openURL("https://ko-fi.com/dathinkingchair")
 		})
-		bar.PackEnd(button, false, false, 0)
+
+		btnBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 4)
+		btnBox.PackStart(button, false, false, 0)
+		supporterLabel, _ := gtk.LabelNew("120+ people already chipped in")
+		addStyleClass(supporterLabel.GetStyleContext, "supporter-count")
+		supporterLabel.SetHAlign(gtk.ALIGN_CENTER)
+		btnBox.PackStart(supporterLabel, false, false, 0)
+		bar.PackEnd(btnBox, false, false, 0)
 	}
 
 	mw.donationBar = bar
@@ -930,14 +954,14 @@ func (mw *MainWindow) updateDonationBar(success bool) {
 	if mw.donationLabel == nil || mw.donationBar == nil {
 		return
 	}
-	text := "<span size='large'><span foreground='#00a2ed'><b>WiiUDownloader is a solo project.</b></span> Your support helps make future updates possible.</span>"
+	text := "<span size='large'><b>120+ people keep this tool alive.</b> <span foreground='#ff813f'>Your coffee keeps it free.</span></span>"
 	if success {
-		text = "<span size='large'><span foreground='#16a34a'><b>Downloads Finished!</b></span> If this app was helpful, please consider leaving a small tip!</span>"
+		text = "<span size='large'><span foreground='#16a34a'><b>Downloads complete.</b></span> You saved hours. <b>A coffee keeps it free for everyone.</b></span>"
 	}
 	mw.donationLabel.SetMarkup(text)
 }
 
-func (mw *MainWindow) showSuccessDialog(count int, path string) {
+func (mw *MainWindow) showSuccessDialog(count int, downloadPath string, decryptOutputPath string) {
 	dialog, err := gtk.DialogNew()
 	if err != nil {
 		log.Println("Unable to create success dialog:", err)
@@ -945,18 +969,22 @@ func (mw *MainWindow) showSuccessDialog(count int, path string) {
 	}
 	defer dialog.Destroy()
 
-	dialog.SetTitle("Download Complete")
+	dialog.SetTitle("WiiUDownloader - Download Complete")
 	dialog.SetModal(true)
 	dialog.SetTransientFor(mw.window)
 	dialog.SetPosition(gtk.WIN_POS_CENTER_ON_PARENT)
 	dialog.AddButton("Close", gtk.RESPONSE_CLOSE)
 
-	dialog.SetDefaultSize(400, -1)
+	dialog.SetDefaultSize(420, -1)
 	contentArea, err := dialog.GetContentArea()
 	if err != nil {
 		return
 	}
 	contentArea.SetSpacing(12)
+	contentArea.SetMarginStart(18)
+	contentArea.SetMarginEnd(18)
+	contentArea.SetMarginTop(12)
+	contentArea.SetMarginBottom(12)
 
 	// Header
 	header, _ := gtk.LabelNew("")
@@ -965,44 +993,115 @@ func (mw *MainWindow) showSuccessDialog(count int, path string) {
 	contentArea.PackStart(header, false, false, 0)
 
 	// Summary Info
-	infoLabel, _ := gtk.LabelNew("")
-	infoLabel.SetMarkup(fmt.Sprintf("Successfully processed %d items.\nSaved to: <span size='small'>%s</span>", count, path))
-	infoLabel.SetLineWrap(true)
-	infoLabel.SetEllipsize(pango.ELLIPSIZE_MIDDLE)
-	infoLabel.SetMaxWidthChars(60)
-	infoLabel.SetXAlign(0.5)
-	infoLabel.SetJustify(gtk.JUSTIFY_CENTER)
-	contentArea.PackStart(infoLabel, false, false, 6)
+	showDual := decryptOutputPath != "" && decryptOutputPath != downloadPath
+	if showDual {
+		infoLabel, _ := gtk.LabelNew("")
+		infoLabel.SetMarkup(fmt.Sprintf("Successfully processed %d items.\n<span size='small'>Download: %s</span>\n<span size='small'>Decrypted: %s</span>", count, downloadPath, decryptOutputPath))
+		infoLabel.SetLineWrap(true)
+		infoLabel.SetEllipsize(pango.ELLIPSIZE_MIDDLE)
+		infoLabel.SetMaxWidthChars(60)
+		infoLabel.SetXAlign(0.5)
+		infoLabel.SetJustify(gtk.JUSTIFY_CENTER)
+		contentArea.PackStart(infoLabel, false, false, 6)
+	} else {
+		infoLabel, _ := gtk.LabelNew("")
+		infoLabel.SetMarkup(fmt.Sprintf("Successfully processed %d items.\nSaved to: <span size='small'>%s</span>", count, downloadPath))
+		infoLabel.SetLineWrap(true)
+		infoLabel.SetEllipsize(pango.ELLIPSIZE_MIDDLE)
+		infoLabel.SetMaxWidthChars(60)
+		infoLabel.SetXAlign(0.5)
+		infoLabel.SetJustify(gtk.JUSTIFY_CENTER)
+		contentArea.PackStart(infoLabel, false, false, 6)
+	}
 
-	// Open Folder Button (Primary Utility)
-	openBtn, _ := gtk.ButtonNewWithLabel("Open Download Folder")
-	openBtn.SetHAlign(gtk.ALIGN_CENTER)
-	openBtn.SetMarginBottom(12)
-	openBtn.Connect("clicked", func() {
-		openURL(path)
-	})
-	contentArea.PackStart(openBtn, false, false, 0)
+	// Open Folder Button(s)
+	if showDual {
+		linkedBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
+		linkedBox.SetHAlign(gtk.ALIGN_CENTER)
+		linkedBox.SetMarginBottom(12)
+		addStyleClass(linkedBox.GetStyleContext, "linked")
+
+		dlBtn, _ := gtk.ButtonNew()
+		dlIcon, _ := gtk.ImageNewFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON)
+		dlLabel, _ := gtk.LabelNew("Open Downloads")
+		dlBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+		dlBtnBox.PackStart(dlIcon, false, false, 0)
+		dlBtnBox.PackStart(dlLabel, false, false, 0)
+		dlBtn.Add(dlBtnBox)
+		dlBtn.Connect("clicked", func() {
+			openURL(downloadPath)
+		})
+		linkedBox.PackStart(dlBtn, true, true, 0)
+
+		decBtn, _ := gtk.ButtonNew()
+		decIcon, _ := gtk.ImageNewFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON)
+		decLabel, _ := gtk.LabelNew("Open Decrypted")
+		decBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+		decBtnBox.PackStart(decIcon, false, false, 0)
+		decBtnBox.PackStart(decLabel, false, false, 0)
+		decBtn.Add(decBtnBox)
+		addStyleClass(decBtn.GetStyleContext, "suggested-action")
+		decBtn.Connect("clicked", func() {
+			openURL(decryptOutputPath)
+		})
+		linkedBox.PackStart(decBtn, true, true, 0)
+
+		contentArea.PackStart(linkedBox, false, false, 0)
+	} else {
+		openBtn, _ := gtk.ButtonNew()
+		openBtn.SetHAlign(gtk.ALIGN_CENTER)
+		openBtn.SetMarginBottom(12)
+		addStyleClass(openBtn.GetStyleContext, "suggested-action")
+
+		folderIcon, _ := gtk.ImageNewFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON)
+		folderLabel, _ := gtk.LabelNew("Open Download Folder")
+		openBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+		openBtnBox.PackStart(folderIcon, false, false, 0)
+		openBtnBox.PackStart(folderLabel, false, false, 0)
+		openBtn.Add(openBtnBox)
+		openBtn.Connect("clicked", func() {
+			openURL(downloadPath)
+		})
+		contentArea.PackStart(openBtn, false, false, 0)
+	}
 
 	// Donation Section (Highlighted)
 	if mw.showDonationBar {
-		donationBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 12)
+		donationBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 8)
 		addStyleClass(donationBox.GetStyleContext, "donation-highlight")
+		donationBox.SetMarginStart(12)
+		donationBox.SetMarginEnd(12)
+		donationBox.SetMarginBottom(12)
+		donationBox.SetMarginTop(6)
 
 		nudgeLabel, _ := gtk.LabelNew("")
-		nudgeLabel.SetMarkup("<span size='large'><b>Success!</b> If this app was helpful, please consider leaving a small tip!</span>")
+		nudgeLabel.SetMarkup("<span size='medium'>You just downloaded free games: no title keys, no server failures, no Windows-only lock-in. <b>120+ supporters chip in to keep it that way.</b></span>")
 		nudgeLabel.SetLineWrap(true)
 		nudgeLabel.SetLineWrapMode(pango.WRAP_WORD)
 		nudgeLabel.SetXAlign(0.5)
 		nudgeLabel.SetJustify(gtk.JUSTIFY_CENTER)
-		donationBox.PackStart(nudgeLabel, false, false, 0)
+		donationBox.PackStart(nudgeLabel, false, false, 6)
 
-		kofiBtn, _ := gtk.ButtonNewWithLabel("Support Me")
+		kofiBtn, _ := gtk.ButtonNew()
 		addStyleClass(kofiBtn.GetStyleContext, "kofi-btn")
 		kofiBtn.SetHAlign(gtk.ALIGN_CENTER)
+
+		kofiIcon, _ := gtk.ImageNewFromIconName(supportMeIconName(), gtk.ICON_SIZE_BUTTON)
+		kofiLabel, _ := gtk.LabelNew("Buy me a coffee")
+		kofiBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+		kofiBtnBox.PackStart(kofiIcon, false, false, 0)
+		kofiBtnBox.PackStart(kofiLabel, false, false, 0)
+		kofiBtn.Add(kofiBtnBox)
+
 		kofiBtn.Connect("clicked", func() {
 			openURL("https://ko-fi.com/dathinkingchair")
 		})
-		donationBox.PackStart(kofiBtn, false, false, 0)
+		donationBox.PackStart(kofiBtn, false, false, 6)
+
+		supporterSmall, _ := gtk.LabelNew("120+ people already chipped in")
+		addStyleClass(supporterSmall.GetStyleContext, "supporter-count")
+		supporterSmall.SetHAlign(gtk.ALIGN_CENTER)
+		donationBox.PackStart(supporterSmall, false, false, 0)
 
 		contentArea.PackStart(donationBox, false, false, 0)
 	}
@@ -1305,7 +1404,7 @@ func (mw *MainWindow) onTreeCursorChanged() {
 	mw.detailPane.ShowEntry(entry, func(titleID uint64) (uint64, error) {
 		mw.sizeFetchSemaphore <- struct{}{}
 		defer func() { <-mw.sizeFetchSemaphore }()
-		return fetchTMDSize(titleID, mw.client)
+		return fetchTMDSize(titleID, entry.Version, mw.client)
 	})
 }
 
@@ -1693,11 +1792,12 @@ func (mw *MainWindow) showErrorsDialog(errors []DownloadError) {
 			}
 			entry := wiiudownloader.GetTitleEntryFromTid(tid)
 			if entry.TitleID != 0 {
+				entry.Version = e.Version
 				titles = append(titles, entry)
 			}
 		}
 		if len(titles) > 0 {
-			mw.addTitlesToQueue(titles)
+			mw.addTitlesToQueueInternal(titles)
 			mw.updateTitlesInQueue()
 		}
 	}
@@ -1729,11 +1829,14 @@ func (mw *MainWindow) onDownloadQueueClicked(selectedPath string, decryptContent
 			}
 			tidStr := fmt.Sprintf("%016x", title.TitleID)
 			titlePath := filepath.Join(selectedPath, fmt.Sprintf("%s [%s] [%s]", normalizeFilename(title.Name), wiiudownloader.GetFormattedKind(title.TitleID), tidStr))
-			downloadErr := wiiudownloader.DownloadTitle(tidStr, titlePath, decryptContents, mw.progressWindow, deleteEncryptedContents, mw.client)
+			if title.Version > 0 {
+				titlePath = fmt.Sprintf("%s [v%d]", titlePath, title.Version)
+			}
+			downloadErr := wiiudownloader.DownloadTitle(tidStr, titlePath, title.Version, decryptContents, mw.progressWindow, deleteEncryptedContents, mw.client, config.DecryptOutputPath)
 
 			if downloadErr != nil && downloadErr != context.Canceled {
 				errorType := detectErrorType(downloadErr.Error())
-				mw.progressWindow.AddErrorWithType(title.Name, downloadErr.Error(), tidStr, errorType)
+				mw.progressWindow.AddErrorWithType(title.Name, downloadErr.Error(), tidStr, errorType, title.Version)
 
 				if config.ContinueOnError {
 					queueStatusChan <- true
@@ -1766,7 +1869,11 @@ func (mw *MainWindow) onDownloadQueueClicked(selectedPath string, decryptContent
 
 		errors := mw.progressWindow.GetErrors()
 		if len(errors) == 0 && !mw.progressWindow.Cancelled() {
-			mw.showSuccessDialog(totalInQueue, selectedPath)
+			decryptPathToShow := ""
+			if decryptContents && config.DecryptOutputPath != "" {
+				decryptPathToShow = config.DecryptOutputPath
+			}
+			mw.showSuccessDialog(totalInQueue, selectedPath, decryptPathToShow)
 		}
 	})
 
@@ -1784,51 +1891,80 @@ func (mw *MainWindow) collectTIDs(titles []wiiudownloader.TitleEntry) []uint64 {
 func (mw *MainWindow) addTitlesToQueue(titles []wiiudownloader.TitleEntry) {
 	var toAdd []wiiudownloader.TitleEntry
 	for _, entry := range titles {
-		if !mw.queuePane.IsTitleInQueue(entry) {
-			toAdd = append(toAdd, entry)
+		if mw.queuePane.IsTitleInQueue(entry) {
+			continue
 		}
+		toAdd = append(toAdd, entry)
 	}
 
-	if len(toAdd) == 0 {
+	mw.addTitlesToQueueInternal(toAdd)
+}
+
+func (mw *MainWindow) addTitlesToQueueInternal(titles []wiiudownloader.TitleEntry) {
+	if len(titles) == 0 {
 		return
 	}
 
-	for _, entry := range toAdd {
+	for _, entry := range titles {
 		mw.queuePane.SetTitleLoadingNoUpdate(entry.TitleID)
 	}
-	mw.queuePane.AddTitles(toAdd)
+	mw.queuePane.AddTitles(titles)
 
 	config, _ := loadConfig()
 	if !config.GetSizeOnQueue {
 		return
 	}
 
-	for _, entry := range toAdd {
-		go func(e wiiudownloader.TitleEntry) {
-			// Acquire semaphore
-			mw.sizeFetchSemaphore <- struct{}{}
-			defer func() { <-mw.sizeFetchSemaphore }()
-
-			if !mw.queuePane.IsTitleInQueue(e) {
-				return
-			}
-
-			size, err := fetchTMDSize(e.TitleID, mw.client)
-
-			if !mw.queuePane.IsTitleInQueue(e) {
-				return
-			}
-
-			uiIdleAdd(func() {
-				if err != nil {
-					log.Printf("Failed to fetch size for %016x: %v", e.TitleID, err)
-					mw.queuePane.SetTitleError(e.TitleID)
-				} else {
-					mw.queuePane.SetTitleSize(e.TitleID, size)
-				}
-			})
-		}(entry)
+	for _, entry := range titles {
+		go mw.fetchTitleSize(entry)
 	}
+}
+
+func (mw *MainWindow) fetchTitleSize(entry wiiudownloader.TitleEntry) {
+	mw.sizeFetchSemaphore <- struct{}{}
+	defer func() { <-mw.sizeFetchSemaphore }()
+
+	if !mw.queuePane.IsTitleInQueue(entry) {
+		return
+	}
+
+	size, err := fetchTMDSize(entry.TitleID, entry.Version, mw.client)
+
+	if !mw.queuePane.IsTitleInQueue(entry) {
+		return
+	}
+
+	uiIdleAdd(func() {
+		if err != nil {
+			log.Printf("Failed to fetch size for %016x: %v", entry.TitleID, err)
+			mw.queuePane.SetTitleError(entry.TitleID)
+		} else {
+			mw.queuePane.SetTitleSize(entry.TitleID, size)
+		}
+	})
+}
+
+func (mw *MainWindow) onSetVersionRequested(entries []wiiudownloader.TitleEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	if len(entries) > 1 {
+		infoDialog := gtk.MessageDialogNew(mw.window, gtk.DIALOG_MODAL, gtk.MESSAGE_INFO, gtk.BUTTONS_OK, "Please select a single title to set its version")
+		infoDialog.Run()
+		infoDialog.Destroy()
+		return
+	}
+
+	entry := entries[0]
+	version, ok := showVersionSelectionDialog(mw.window, entry)
+	if !ok {
+		return
+	}
+
+	mw.queuePane.SetTitleVersion(entry.TitleID, version)
+	updated := entry
+	updated.Version = version
+	go mw.fetchTitleSize(updated)
 }
 
 func (mw *MainWindow) showAddByTitleIDDialog() {
@@ -1892,7 +2028,7 @@ func (mw *MainWindow) showAddByTitleIDDialog() {
 			}
 		}
 
-		mw.addTitlesToQueue([]wiiudownloader.TitleEntry{entry})
+		mw.addTitlesToQueueInternal([]wiiudownloader.TitleEntry{entry})
 		mw.updateTitlesInQueue()
 	}
 }

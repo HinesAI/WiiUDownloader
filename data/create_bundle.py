@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
+import glob
 import os
-import sys
+import re
 import shutil
 import subprocess
 import sys
-import re
-import glob
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bundle_paths import rewrite_binary
+from theme_compat import install_adwaita_compat_aliases
+
+
+MIN_MACOS_VERSION = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
 
 
 def run(cmd):
@@ -17,9 +24,39 @@ def run(cmd):
     return result
 
 
+def set_minimum_macos_version(path):
+    parts = MIN_MACOS_VERSION.split(".")
+    minos = ".".join((parts + ["0", "0"])[:2])
+    tmp_path = f"{path}.vtool.tmp"
+    vtool_cmd = ["vtool", "-set-build-version", "macos", minos, minos, "-replace", "-output", tmp_path, path]
+    try:
+        print(f"Running: {' '.join(vtool_cmd)}")
+        res = subprocess.run(vtool_cmd, capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        print(f"Warning: vtool timed out while processing {path}; skipping version bump")
+        return
+    if res.returncode != 0:
+        print(f"vtool failed for {path}. STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
+        print(f"Warning: could not set minimum macOS version for {path}")
+        return
+    try:
+        os.replace(tmp_path, path)
+    except Exception as e:
+        print(f"Warning: failed to move vtool output for {path}: {e}")
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except:
+            pass
+
+
 def get_deps(path):
+    if not os.path.exists(path):
+        print(f"Warning: path does not exist: {path}")
+        return []
     res = run(f'otool -L "{path}"')
-    if not res:
+    if not res or res.returncode != 0:
+        print(f"Warning: otool failed for {path}")
         return []
     deps = []
     for line in res.stdout.split("\n")[1:]:
@@ -67,23 +104,15 @@ env_exec = os.environ.get("EXECUTABLE_PATH")
 if env_exec and os.path.exists(env_exec):
     executable_path = env_exec
 else:
-    candidates = [
-        "main",
-        os.path.join("cmd", "WiiUDownloader", "main"),
-    ]
-    executable_path = None
-    for c in candidates:
-        if os.path.exists(c):
-            executable_path = c
-            break
-    if not executable_path:
-        try:
-            build_dir = os.path.join("cmd", "WiiUDownloader")
-            subprocess.check_call(["go", "build", "-o", "main"], cwd=build_dir)
-            executable_path = os.path.join(build_dir, "main")
-        except subprocess.CalledProcessError as e:
-            print(f"Error building executable: {e}")
-            sys.exit(1)
+    build_dir = os.path.join("cmd", "WiiUDownloader")
+    build_env = os.environ.copy()
+    build_env.setdefault("MACOSX_DEPLOYMENT_TARGET", MIN_MACOS_VERSION)
+    try:
+        subprocess.check_call(["go", "build", "-o", "main"], cwd=build_dir, env=build_env)
+        executable_path = os.path.join(build_dir, "main")
+    except subprocess.CalledProcessError as e:
+        print(f"Error building executable: {e}")
+        sys.exit(1)
 app_bundle_path = "out/WiiUDownloader.app"
 contents_path = os.path.join(app_bundle_path, "Contents")
 macos_path = os.path.join(contents_path, "MacOS")
@@ -145,27 +174,84 @@ if os.path.exists(icon_src):
 else:
     print(f"Warning: {icon_src} not found")
 
-# 1. Recursive Bundle
+# 1. Recursive Bundle (Manual)
 processed = set()
 main_exe = os.path.join(macos_path, "WiiUDownloader")
 for dep in get_deps(main_exe):
     bundle_lib(dep, lib_path, processed, search_paths)
 
 # 2. Bundle Modules (GIO/Loaders)
-# GdkPixbuf loaders
-loaders_dest = os.path.join(lib_path, "loaders")
+loaders_dest = os.path.join(lib_path, "gdkpixbuf_loaders")
 os.makedirs(loaders_dest, exist_ok=True)
-for pattern in [
-    "libpixbufloader-png.so",
-    "libpixbufloader-svg.so",
-    "libpixbufloader-ico.so",
-]:
-    matches = glob.glob(
-        os.path.join(brew_prefix, "lib", "gdk-pixbuf-2.0", "*", "loaders", pattern)
-    )
-    if matches:
-        shutil.copy2(os.path.realpath(matches[0]), os.path.join(loaders_dest, pattern))
-        bundle_lib(matches[0], lib_path, processed, search_paths)
+
+loaders_src_dir = None
+for candidate in glob.glob(os.path.join(brew_prefix, "lib", "gdk-pixbuf-2.0", "*", "loaders")):
+    if os.path.isdir(candidate):
+        loaders_src_dir = candidate
+        break
+
+if loaders_src_dir:
+    print(f"Copying pixbuf loaders from {loaders_src_dir}")
+    for so_file in glob.glob(os.path.join(loaders_src_dir, "*.so")):
+        real = os.path.realpath(so_file)
+        dest = os.path.join(loaders_dest, os.path.basename(so_file))
+        try:
+            shutil.copy2(real, dest)
+            print(f"  Copied: {os.path.basename(so_file)}")
+            bundle_lib(so_file, lib_path, processed, search_paths)
+        except Exception as e:
+            print(f"  Warning: failed to copy {os.path.basename(so_file)}: {e}")
+else:
+    print("Warning: gdk-pixbuf loaders directory not found!")
+
+# Ensure librsvg
+rsvg_lib = None
+for candidate in glob.glob(os.path.join(brew_prefix, "lib", "librsvg-*.dylib")):
+    rsvg_real = os.path.realpath(candidate)
+    if os.path.exists(rsvg_real):
+        rsvg_lib = rsvg_real
+        break
+if not rsvg_lib:
+    for candidate in glob.glob(os.path.join(brew_prefix, "opt", "librsvg", "lib", "librsvg-*.dylib")):
+        rsvg_real = os.path.realpath(candidate)
+        if os.path.exists(rsvg_real):
+            rsvg_lib = rsvg_real
+            break
+if rsvg_lib:
+    bundle_lib(rsvg_lib, lib_path, processed, search_paths)
+    shutil.copy2(os.path.realpath(rsvg_lib), os.path.join(loaders_dest, os.path.basename(rsvg_lib)))
+    print(f"Copied {os.path.basename(rsvg_lib)} into gdkpixbuf_loaders")
+else:
+    print("Warning: librsvg not found for SVG loader")
+
+cache_path = os.path.join(resources_path, "loaders.cache")
+query_loaders = os.path.join(brew_prefix, "bin", "gdk-pixbuf-query-loaders")
+bundled_loaders = sorted(glob.glob(os.path.join(loaders_dest, "*.so")))
+if os.path.exists(query_loaders) and bundled_loaders:
+    query_env = os.environ.copy()
+    # Help the query tool find bundled dylibs while inspecting loaders
+    dyld_paths = [loaders_dest, lib_path]
+    existing_dyld = query_env.get("DYLD_LIBRARY_PATH", "")
+    if existing_dyld:
+        dyld_paths.insert(0, existing_dyld)
+    query_env["DYLD_LIBRARY_PATH"] = ":".join(dyld_paths)
+    res = subprocess.run([query_loaders] + bundled_loaders, capture_output=True, text=True, env=query_env)
+    if res.returncode == 0 and res.stdout:
+        cache_content = re.sub(
+            r'"[^"]*?/gdkpixbuf_loaders/([^"]+\.so)"',
+            r'"@executable_path/lib/gdkpixbuf_loaders/\1"',
+            res.stdout,
+        )
+        with open(cache_path, "w") as f:
+            f.write(cache_content)
+        svg_present = "libpixbufloader_svg.so" in cache_content
+        print(f"Created loaders.cache ({len(bundled_loaders)} loaders, svg={'OK' if svg_present else 'MISSING'}, paths=@executable_path)")
+    else:
+        open(cache_path, "w").close()
+        print("Warning: gdk-pixbuf-query-loaders failed, created empty loaders.cache")
+else:
+    open(cache_path, "w").close()
+    print("Warning: gdk-pixbuf-query-loaders not found or no loaders, created empty loaders.cache")
 
 # GIO modules
 gio_dest = os.path.join(lib_path, "gio-modules")
@@ -174,77 +260,94 @@ for mod in glob.glob(os.path.join(brew_prefix, "lib", "gio", "modules", "*.so"))
     shutil.copy2(os.path.realpath(mod), os.path.join(gio_dest, os.path.basename(mod)))
     bundle_lib(mod, lib_path, processed, search_paths)
 
-# 3. RPATH STRATEGY FAIL-SAFE
-print("=== RPATH Deep Fix ===")
-# Add search paths to the main executable
-run(f'install_name_tool -add_rpath "@executable_path/lib" "{main_exe}"')
+# 3. Use dylibbundler to fix all paths and rpaths
+print("=== Fixing dylib paths with dylibbundler ===")
+dylibbundler_cmd = [
+    "dylibbundler",
+    "-d", lib_path,
+    "-x", main_exe,
+    "-n",
+    "-o",
+]
+for sp in search_paths:
+    dylibbundler_cmd.extend(["-s", sp])
 
-# Fix EVERY binary in the bundle
+print(f"Running: {' '.join(dylibbundler_cmd)}")
+try:
+    subprocess.run(dylibbundler_cmd, check=True, capture_output=True, text=True)
+    print("dylibbundler completed successfully")
+except subprocess.CalledProcessError as e:
+    print("dylibbundler failed (continuing anyway; rewrite_binary() will fix paths):")
+    print(f"  stdout: {e.stdout!r}")
+    print(f"  stderr: {e.stderr!r}")
+
+print("=== Rewriting load commands and rpaths ===")
+rewrite_binary(main_exe, is_main_exe=True, run_fn=print)
 for root, dirs, files in os.walk(macos_path):
     for f in files:
-        if (
-            f.endswith(".dylib")
-            or ".dylib." in f
-            or f.endswith(".so")
-            or f == "WiiUDownloader"
-        ):
-            p = os.path.join(root, f)
-            # Ensure dylibs have @rpath ID
-            if f.endswith(".dylib") or ".dylib." in f or f.endswith(".so"):
-                run(f'install_name_tool -id "@rpath/{f}" "{p}"')
-                # Add @loader_path to dylibs so they can find their neighbors
-                run(f'install_name_tool -add_rpath "@loader_path" "{p}"')
-                run(f'install_name_tool -add_rpath "@loader_path/.." "{p}"')
+        if f.endswith(".dylib") or f.endswith(".so"):
+            rewrite_binary(os.path.join(root, f), is_main_exe=False, run_fn=print)
 
-            # Change all dependencies to @rpath
-            deps = run(f'otool -L "{p}"').stdout.split("\n")[1:]
-            for line in deps:
-                line = line.strip()
-                if not line:
-                    continue
-                match = re.match(r"^(.+?)\s+\(", line)
-                if not match:
-                    continue
-                old_path = match.group(1)
-                if any(
-                    old_path.startswith(prefix)
-                    for prefix in ["/opt/homebrew", "/usr/local", "/opt/local"]
-                ):
-                    new_path = f"@rpath/{os.path.basename(old_path)}"
-                    run(f'install_name_tool -change "{old_path}" "{new_path}" "{p}"')
+# vtool only on main exe and dylibs (not .so which lack LC_BUILD_VERSION)
+set_minimum_macos_version(main_exe)
+for f in os.listdir(lib_path):
+    if f.endswith(".dylib"):
+        set_minimum_macos_version(os.path.join(lib_path, f))
 
-            run(f'codesign --force --sign - "{p}"')
-
-# 4. Resources
+# 5. Resources
 share_src = os.path.join(brew_prefix, "share")
 dest_share = os.path.join(resources_path, "share")
-for item in ["glib-2.0/schemas", "icons/Adwaita", "icons/hicolor", "themes/Adwaita"]:
+os.makedirs(dest_share, exist_ok=True)
+
+dereference_items = ["icons/Adwaita", "icons/hicolor", "themes/Adwaita", "mime"]
+no_dereference_items = ["glib-2.0/schemas"]
+
+for item in dereference_items + no_dereference_items:
     src = os.path.join(share_src, item)
     if os.path.exists(src):
+        src = os.path.realpath(src)
         dst = os.path.join(dest_share, item)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        (
-            shutil.copytree(
-                os.path.realpath(src),
-                dst,
-                symlinks=False,
-                ignore_dangling_symlinks=True,
-            )
-            if os.path.isdir(src)
-            else shutil.copy2(os.path.realpath(src), dst)
-        )
+        print(f"Copying resource: {item}")
+        if os.path.isdir(src):
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            deref = "--dereference" if item in dereference_items else ""
+            run(f'tar {deref} -C "{os.path.dirname(src)}" -cf - "{os.path.basename(src)}" | tar -C "{os.path.dirname(dst)}" -xf -')
+        else:
+            shutil.copy2(src, dst)
 
-# 5. GENERATE LOADERS CACHE
-print("=== Generating Loaders Cache ===")
-query_loaders = os.path.join(brew_prefix, "bin", "gdk-pixbuf-query-loaders")
-if os.path.exists(query_loaders):
-    bundled_loaders = glob.glob(os.path.join(loaders_dest, "*.so"))
-    if bundled_loaders:
-        res = subprocess.run(
-            [query_loaders] + bundled_loaders, capture_output=True, text=True
-        )
-        if res.returncode == 0:
-            # Place it in Resources instead of MacOS/lib to satisfy codesign
-            with open(os.path.join(resources_path, "loaders.cache"), "w") as f:
-                f.write(res.stdout)
-            print("Created loaders.cache in Resources")
+# Fix icon theme
+for icon_dir in glob.glob(os.path.join(dest_share, "icons", "*")):
+    if os.path.isdir(icon_dir):
+        index_theme = os.path.join(icon_dir, "index.theme")
+        if os.path.exists(index_theme):
+            with open(index_theme, "r") as f:
+                content = f.read()
+            content = content.replace("Hidden=true", "Hidden=false")
+            with open(index_theme, "w") as f:
+                f.write(content)
+        install_adwaita_compat_aliases(icon_dir)
+        cache_file = os.path.join(icon_dir, "icon-theme.cache")
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+        update_cache = os.path.join(brew_prefix, "bin", "gtk-update-icon-cache")
+        if os.path.exists(update_cache):
+            run(f'"{update_cache}" -f "{icon_dir}"')
+            print(f"Regenerated icon cache: {os.path.basename(icon_dir)}")
+
+print("=== Bundle Complete ===")
+
+# 6. Ad-hoc code signing (macOS SIP requires all dlopen'd code to be signed)
+print("=== Code Signing ===")
+# Sign libraries and loaders first (inside-out ordering)
+for root, dirs, files in os.walk(macos_path):
+    for f in sorted(files):
+        if f.endswith(".so") or f.endswith(".dylib"):
+            p = os.path.join(root, f)
+            run(f'codesign --sign - --force --timestamp=none "{p}"')
+# Sign the main executable
+run(f'codesign --sign - --force --timestamp=none "{main_exe}"')
+# Sign the entire bundle (catches any remaining unsigned code)
+run(f'codesign --sign - --force --deep --timestamp=none "{app_bundle_path}"')
+print("Code signing complete")

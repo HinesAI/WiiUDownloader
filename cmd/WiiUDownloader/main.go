@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -34,8 +36,23 @@ const (
 func main() {
 	runtime.LockOSThread()
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	config, configErr := loadConfig()
+	if config == nil {
+		config = getDefaultConfig()
+	}
+	if runtime.GOOS == "darwin" {
+		if config.DarkMode {
+			os.Setenv("GTK_THEME", "Adwaita:dark")
+		} else {
+			os.Setenv("GTK_THEME", "Adwaita")
+		}
+	}
+
 	configureMacOSEnvironment()
 	gtk.Init(nil)
+
+	setDarkTheme(config.DarkMode)
 
 	app, err := gtk.ApplicationNew("io.github.xpl0itu.wiiudownloader", glib.APPLICATION_FLAGS_NONE)
 	if err != nil {
@@ -53,22 +70,13 @@ func main() {
 	}
 
 	client := buildHTTPClient()
-	config, err := loadConfig()
-	if err != nil {
-		log.Printf("error loading config: %v", err)
-		errorDialog := gtk.MessageDialogNew(nil, 0, gtk.MESSAGE_WARNING, gtk.BUTTONS_OK, "Error loading config: %v\n\nStarting with default settings.", err)
-		errorDialog.Run()
-		errorDialog.Destroy()
-	}
-	if config == nil {
-		config = getDefaultConfig()
-	}
-
-	if settings, err := gtk.SettingsGetDefault(); err != nil {
-		log.Printf("error getting gtk settings: %v", err)
-	} else if settings != nil {
-		settings.SetProperty("gtk-theme-name", "Adwaita")
-		settings.SetProperty("gtk-application-prefer-dark-theme", config.DarkMode)
+	if configErr != nil {
+		log.Printf("error loading config: %v", configErr)
+		uiIdleAdd(func() {
+			errorDialog := gtk.MessageDialogNew(nil, 0, gtk.MESSAGE_WARNING, gtk.BUTTONS_OK, "Error loading config: %v\n\nStarting with default settings.", configErr)
+			errorDialog.Run()
+			errorDialog.Destroy()
+		})
 	}
 
 	win := NewMainWindow(wiiudownloader.GetTitleEntries(wiiudownloader.TITLE_CATEGORY_GAME), client, config)
@@ -88,8 +96,8 @@ func main() {
 			assistant.SetPostSetupCallback(func() {
 				showMainWindow(app, win)
 			})
-			assistant.assistantWindow.ShowAll()
 			app.AddWindow(assistant.assistantWindow)
+			assistant.assistantWindow.ShowAll()
 			if win.window != nil {
 				win.window.Hide()
 			}
@@ -126,10 +134,23 @@ func configureMacOSEnvironment() {
 		os.Setenv("GSETTINGS_SCHEMA_DIR", glibPath)
 	}
 
-	os.Setenv("GDK_PIXBUF_MODULE_DIR", filepath.Join(bundlePath, "MacOS", "lib", "loaders"))
-	cachePath := filepath.Join(bundlePath, "Resources", "loaders.cache")
-	if _, err := os.Stat(cachePath); err == nil {
-		os.Setenv("GDK_PIXBUF_MODULE_FILE", cachePath)
+	loaderDir := filepath.Join(bundlePath, "MacOS", "lib", "gdkpixbuf_loaders")
+	if _, err := os.Stat(loaderDir); err == nil {
+		os.Setenv("GDK_PIXBUF_MODULE_DIR", loaderDir)
+		if cacheOrig, ok := bundledLoadersCachePath(bundlePath); ok {
+			if cachePath, err := rewriteLoadersCachePaths(cacheOrig, loaderDir); err == nil {
+				os.Setenv("GDK_PIXBUF_MODULE_FILE", cachePath)
+				log.Printf("Set GDK_PIXBUF_MODULE_FILE to rewritten bundle cache %s", cachePath)
+			} else {
+				log.Printf("loaders.cache rewrite failed: %v; falling back to runtime generation from %s", err, loaderDir)
+				regenerateLoadersCache(loaderDir)
+			}
+		} else {
+			log.Printf("Bundled loaders cache not found, falling back to runtime generation from %s", loaderDir)
+			regenerateLoadersCache(loaderDir)
+		}
+	} else {
+		log.Printf("LoaderDir not found: %s", loaderDir)
 	}
 
 	gioModPath := filepath.Join(bundlePath, "MacOS", "lib", "gio-modules")
@@ -139,11 +160,6 @@ func configureMacOSEnvironment() {
 	sharePath := filepath.Join(bundlePath, "Resources", "share")
 	if _, err := os.Stat(sharePath); err == nil {
 		os.Setenv("XDG_DATA_DIRS", sharePath)
-		if isDarkMode() {
-			os.Setenv("GTK_THEME", "Adwaita:dark")
-		} else {
-			os.Setenv("GTK_THEME", "Adwaita")
-		}
 	}
 }
 
@@ -199,7 +215,8 @@ func showMainWindow(app *gtk.Application, win *MainWindow) {
 	win.BuildUI()
 	app.AddWindow(win.window)
 	if win.window != nil {
-		win.window.Show()
+		win.window.ShowAll()
+		win.PostShowInit()
 	}
 }
 
@@ -208,4 +225,111 @@ func showFatalDialogAndLog(prefix string, err error) {
 	d := gtk.MessageDialogNew(nil, 0, gtk.MESSAGE_ERROR, gtk.BUTTONS_OK, "%s: %v", prefix, err)
 	d.Run()
 	d.Destroy()
+}
+
+func bundledLoadersCachePath(bundlePath string) (string, bool) {
+	cachePath := filepath.Join(bundlePath, "Resources", "loaders.cache")
+	if _, err := os.Stat(cachePath); err == nil {
+		return cachePath, true
+	}
+	return "", false
+}
+
+func bundledAdwaitaSymbolicIconPath(bundlePath, category, iconName string) (string, bool) {
+	iconPath := filepath.Join(bundlePath, "Resources", "share", "icons", "Adwaita", "symbolic", category, iconName)
+	if _, err := os.Stat(iconPath); err == nil {
+		return iconPath, true
+	}
+	return "", false
+}
+
+func rewriteLoadersCachePaths(cacheOrig, runtimeLoaderDir string) (string, error) {
+	data, err := os.ReadFile(cacheOrig)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, ".so\"") {
+			soName := filepath.Base(strings.Trim(trimmed, "\""))
+			lines[i] = "\"" + filepath.Join(runtimeLoaderDir, soName) + "\""
+		}
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	cachePath := filepath.Join(cacheDir, "wiiu-loaders.cache")
+	// Write to a temp file then atomically rename so a second concurrent
+	// launch of the app can't leave readers with a torn cache.
+	tmp, err := os.CreateTemp(cacheDir, "wiiu-loaders.cache.*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		// If we never made it to the rename, clean up the dangling temp.
+		if _, statErr := os.Stat(tmpPath); statErr == nil {
+			os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write([]byte(strings.Join(lines, "\n"))); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmpPath, cachePath); err != nil {
+		return "", err
+	}
+	// CreateTemp's default mode is 0600; restore 0644 to match prior behavior.
+	if err := os.Chmod(cachePath, 0o644); err != nil {
+		return "", err
+	}
+	return cachePath, nil
+}
+
+func regenerateLoadersCache(loaderDir string) {
+	cacheDir, _ := os.UserCacheDir()
+	cachePath := filepath.Join(cacheDir, "wiiu-loaders.cache")
+	loaders, _ := filepath.Glob(filepath.Join(loaderDir, "*.so"))
+	cacheData := buildLoadersCache(loaders)
+	if err := os.WriteFile(cachePath, cacheData, 0o644); err == nil {
+		os.Setenv("GDK_PIXBUF_MODULE_FILE", cachePath)
+		log.Printf("Set GDK_PIXBUF_MODULE_FILE to regenerated %s", cachePath)
+	} else {
+		log.Printf("Failed to write regenerated cache: %v", err)
+	}
+}
+
+func buildLoadersCache(loaders []string) []byte {
+	var cache bytes.Buffer
+	cache.WriteString("# GdkPixbuf Image Loader Modules\n# Automatically generated\n\n")
+	for _, loader := range loaders {
+		filename := filepath.Base(loader)
+		entry := getLoaderEntry(filename, loader)
+		if entry == "" {
+			continue
+		}
+		cache.WriteString(entry)
+		cache.WriteString("\n")
+	}
+	return cache.Bytes()
+}
+
+func getLoaderEntry(filename, path string) string {
+	switch {
+	case strings.Contains(filename, "svg"):
+		return fmt.Sprintf("%q\n\"svg\" 6 \"gdk-pixbuf\" \"Scalable Vector Graphics\" \"LGPL\"\n\"image/svg+xml\" \"image/svg\" \"image/svg-xml\" \"image/vnd.adobe.svg+xml\" \"text/xml-svg\" \"image/svg+xml-compressed\" \"\"\n\"svg\" \"svgz\" \"svg.gz\" \"\"\n\" <svg\" \"*    \" 100\n\" <!DOCTYPE svg\" \"*             \" 100", path)
+	case strings.Contains(filename, "bmp"):
+		return fmt.Sprintf("%q\n\"bmp\" 5 \"gdk-pixbuf\" \"BMP\" \"LGPL\"\n\"image/bmp\" \"image/x-bmp\" \"image/x-MS-bmp\" \"\"\n\"bmp\" \"\"\n\"BM\" \"\" 100", path)
+	case strings.Contains(filename, "gif"):
+		return fmt.Sprintf("%q\n\"gif\" 4 \"gdk-pixbuf\" \"GIF\" \"LGPL\"\n\"image/gif\" \"\"\n\"gif\" \"\"\n\"GIF8\" \"\" 100", path)
+	case strings.Contains(filename, "ico"):
+		return fmt.Sprintf("%q\n\"ico\" 5 \"gdk-pixbuf\" \"Windows icon\" \"LGPL\"\n\"image/x-icon\" \"image/x-ico\" \"image/x-win-bitmap\" \"image/vnd.microsoft.icon\" \"application/ico\" \"image/ico\" \"image/icon\" \"text/ico\" \"\"\n\"ico\" \"cur\" \"\"\n\"  \\001   \" \"zz znz\" 100\n\"  \\002   \" \"zz znz\" 100", path)
+	default:
+		return ""
+	}
 }
