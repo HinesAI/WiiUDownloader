@@ -111,8 +111,7 @@ func NewQueuePane() (*QueuePane, error) {
 	headerBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 4)
 	if err == nil {
 		versionHeaderLabel, _ := gtk.LabelNew("Version")
-		versionHeaderImage, _ := gtk.ImageNewFromIconName("document-edit-symbolic", gtk.ICON_SIZE_MENU)
-		if versionHeaderImage != nil {
+		if versionHeaderImage := imageFromIconName("document-edit-symbolic", gtk.ICON_SIZE_MENU); versionHeaderImage != nil {
 			headerBox.PackStart(versionHeaderImage, false, false, 0)
 		}
 		if versionHeaderLabel != nil {
@@ -145,11 +144,12 @@ func NewQueuePane() (*QueuePane, error) {
 		return nil, err
 	}
 	removeLabel, err := gtk.LabelNew("Remove Selected")
-	removeIcon, err := gtk.ImageNewFromIconName("list-remove-symbolic", gtk.ICON_SIZE_BUTTON)
 	if err == nil {
 		removeLabel.SetJustify(gtk.JUSTIFY_CENTER)
 		removeBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		removeBtnBox.PackStart(removeIcon, false, false, 0)
+		if removeIcon := imageFromIconName("list-remove-symbolic", gtk.ICON_SIZE_BUTTON); removeIcon != nil {
+			removeBtnBox.PackStart(removeIcon, false, false, 0)
+		}
 		removeBtnBox.PackStart(removeLabel, false, false, 0)
 		removeBtnBox.SetHAlign(gtk.ALIGN_CENTER)
 		removeFromQueueButton.Add(removeBtnBox)
@@ -164,11 +164,12 @@ func NewQueuePane() (*QueuePane, error) {
 		return nil, err
 	}
 	downloadLabel, err := gtk.LabelNew("Download Queue")
-	downloadIcon, err := gtk.ImageNewFromIconName(queueDownloadIconName(), gtk.ICON_SIZE_BUTTON)
 	if err == nil {
 		downloadLabel.SetJustify(gtk.JUSTIFY_CENTER)
 		downloadBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		downloadBtnBox.PackStart(downloadIcon, false, false, 0)
+		if downloadIcon := imageFromIconName(queueDownloadIconName(), gtk.ICON_SIZE_BUTTON); downloadIcon != nil {
+			downloadBtnBox.PackStart(downloadIcon, false, false, 0)
+		}
 		downloadBtnBox.PackStart(downloadLabel, false, false, 0)
 		downloadBtnBox.SetHAlign(gtk.ALIGN_CENTER)
 		downloadButton.Add(downloadBtnBox)

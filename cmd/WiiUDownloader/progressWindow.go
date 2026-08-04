@@ -382,10 +382,12 @@ func createProgressWindow(parent *gtk.Window) (*ProgressWindow, error) {
 	if err != nil {
 		return nil, err
 	}
-	cancelIcon, _ := gtk.ImageNewFromIconName("process-stop-symbolic", gtk.ICON_SIZE_BUTTON)
+	cancelIcon := imageFromIconName("process-stop-symbolic", gtk.ICON_SIZE_BUTTON)
 	cancelLabel, _ := gtk.LabelNew("Cancel")
 	cancelBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-	cancelBtnBox.PackStart(cancelIcon, false, false, 0)
+	if cancelIcon != nil {
+		cancelBtnBox.PackStart(cancelIcon, false, false, 0)
+	}
 	cancelBtnBox.PackStart(cancelLabel, false, false, 0)
 	cancelBtnBox.SetHAlign(gtk.ALIGN_CENTER)
 	cancelButton.Add(cancelBtnBox)
@@ -396,10 +398,12 @@ func createProgressWindow(parent *gtk.Window) (*ProgressWindow, error) {
 	if err != nil {
 		return nil, err
 	}
-	pauseIcon, _ := gtk.ImageNewFromIconName("media-playback-pause-symbolic", gtk.ICON_SIZE_BUTTON)
+	pauseIcon := imageFromIconName("media-playback-pause-symbolic", gtk.ICON_SIZE_BUTTON)
 	pauseLabel, _ := gtk.LabelNew("Pause")
 	pauseBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-	pauseBtnBox.PackStart(pauseIcon, false, false, 0)
+	if pauseIcon != nil {
+		pauseBtnBox.PackStart(pauseIcon, false, false, 0)
+	}
 	pauseBtnBox.PackStart(pauseLabel, false, false, 0)
 	pauseBtnBox.SetHAlign(gtk.ALIGN_CENTER)
 	pauseButton.Add(pauseBtnBox)

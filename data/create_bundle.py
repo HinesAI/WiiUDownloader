@@ -142,35 +142,19 @@ shutil.copy("data/Info.plist", os.path.join(contents_path, "Info.plist"))
 shutil.copy(executable_path, os.path.join(macos_path, "WiiUDownloader"))
 os.chmod(os.path.join(macos_path, "WiiUDownloader"), 0o755)
 
-# Generate ICNS
+# Generate ICNS (Pillow — sips/iconutil crash on some macOS/PNG combos)
 print("=== Generating Icon ===")
 icon_src = "data/WiiUDownloader.png"
 if os.path.exists(icon_src):
-    iconset = "WiiUDownloader.iconset"
-    if os.path.exists(iconset):
-        shutil.rmtree(iconset)
-    os.makedirs(iconset)
+    try:
+        from PIL import Image
 
-    # Standard sizes
-    sizes = [16, 32, 128, 256, 512]
-    for s in sizes:
-        subprocess.run(
-            f"sips -z {s} {s} {icon_src} --out {iconset}/icon_{s}x{s}.png", shell=True
-        )
-        subprocess.run(
-            f"sips -z {s*2} {s*2} {icon_src} --out {iconset}/icon_{s}x{s}@2x.png",
-            shell=True,
-        )
-
-    subprocess.run(f"iconutil -c icns {iconset}", shell=True)
-    if os.path.exists("WiiUDownloader.icns"):
-        shutil.move(
-            "WiiUDownloader.icns", os.path.join(resources_path, "WiiUDownloader.icns")
-        )
-        print("Icon created and installed.")
-    else:
-        print("Error: Failed to create icns file.")
-    shutil.rmtree(iconset)
+        img = Image.open(icon_src).convert("RGBA")
+        icns_dest = os.path.join(resources_path, "WiiUDownloader.icns")
+        img.save(icns_dest, format="ICNS")
+        print(f"Icon created and installed ({os.path.getsize(icns_dest)} bytes).")
+    except Exception as e:
+        print(f"Error: Failed to create icns file: {e}")
 else:
     print(f"Warning: {icon_src} not found")
 
@@ -316,6 +300,11 @@ for item in dereference_items + no_dereference_items:
             run(f'tar {deref} -C "{os.path.dirname(src)}" -cf - "{os.path.basename(src)}" | tar -C "{os.path.dirname(dst)}" -xf -')
         else:
             shutil.copy2(src, dst)
+    elif item == "icons/Adwaita":
+        raise SystemExit(
+            "Missing icons/Adwaita — install with: brew install adwaita-icon-theme\n"
+            "Without it, GTK buttons show broken-image placeholders for symbolic icons."
+        )
 
 # Fix icon theme
 for icon_dir in glob.glob(os.path.join(dest_share, "icons", "*")):

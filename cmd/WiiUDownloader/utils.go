@@ -335,6 +335,24 @@ func supportMeIconName() string {
 	return "starred-symbolic"
 }
 
+// imageFromIconName returns a GTK image only when the icon theme actually has
+// the named icon. Missing symbolic icons otherwise render as a broken-image
+// placeholder (common when Adwaita isn't bundled on macOS).
+func imageFromIconName(iconName string, size gtk.IconSize) *gtk.Image {
+	if iconName == "" {
+		return nil
+	}
+	theme, err := gtk.IconThemeGetDefault()
+	if err != nil || theme == nil || !theme.HasIcon(iconName) {
+		return nil
+	}
+	img, err := gtk.ImageNewFromIconName(iconName, size)
+	if err != nil {
+		return nil
+	}
+	return img
+}
+
 func detectErrorType(errorMsg string) string {
 	errorLower := strings.ToLower(errorMsg)
 

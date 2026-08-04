@@ -87,9 +87,12 @@ func saveCachedCoverPNG(titleID uint64, pngData []byte) {
 	_ = os.WriteFile(path, pngData, 0o644)
 }
 
-func fetchTitleCoverPNG(titleID uint64) ([]byte, error) {
+func fetchTitleCoverImage(titleID uint64) (image.Image, error) {
 	if cached, ok := loadCachedCoverPNG(titleID); ok {
-		return cached, nil
+		img, err := png.Decode(bytes.NewReader(cached))
+		if err == nil {
+			return img, nil
+		}
 	}
 
 	keyBucket := uint8((titleID >> 8) & 0xFF)
@@ -108,23 +111,21 @@ func fetchTitleCoverPNG(titleID uint64) ([]byte, error) {
 		return nil, err
 	}
 
-	pngData, err := idbeToPNG(encrypted)
+	img, err := idbeToImage(encrypted)
 	if err != nil {
 		return nil, err
 	}
-	saveCachedCoverPNG(titleID, pngData)
-	return pngData, nil
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err == nil {
+		saveCachedCoverPNG(titleID, buf.Bytes())
+	}
+	return img, nil
 }
 
-func idbeToPNG(encrypted []byte) ([]byte, error) {
-	plain, err := decryptIDBE(encrypted)
-	if err != nil {
-		return nil, err
-	}
-	if len(plain) <= idbeTGAOffset {
-		return nil, fmt.Errorf("idbe payload too short")
-	}
-	img, err := decodeUncompressedTGA(plain[idbeTGAOffset:])
+// fetchTitleCoverPNG remains for tests; prefer fetchTitleCoverImage for UI.
+func fetchTitleCoverPNG(titleID uint64) ([]byte, error) {
+	img, err := fetchTitleCoverImage(titleID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +134,43 @@ func idbeToPNG(encrypted []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func idbeToImage(encrypted []byte) (image.Image, error) {
+	plain, err := decryptIDBE(encrypted)
+	if err != nil {
+		return nil, err
+	}
+	if len(plain) <= idbeTGAOffset {
+		return nil, fmt.Errorf("idbe payload too short")
+	}
+	return decodeUncompressedTGA(plain[idbeTGAOffset:])
+}
+
+func idbeToPNG(encrypted []byte) ([]byte, error) {
+	img, err := idbeToImage(encrypted)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func imageToNRGBA(img image.Image) *image.NRGBA {
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		return nrgba
+	}
+	bounds := img.Bounds()
+	out := image.NewNRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			out.Set(x, y, img.At(x, y))
+		}
+	}
+	return out
 }
 
 func decryptIDBE(data []byte) ([]byte, error) {

@@ -116,7 +116,9 @@ func NewMainWindow(entries []wiiudownloader.TitleEntry, client *http.Client, con
 	searchEntry.SetHExpand(false)
 	searchEntry.SetHAlign(gtk.ALIGN_END)
 	searchEntry.SetWidthChars(SEARCH_ENTRY_WIDTH_CHARS)
-	searchEntry.SetIconFromIconName(gtk.ENTRY_ICON_PRIMARY, "edit-find-symbolic")
+	if theme, err := gtk.IconThemeGetDefault(); err == nil && theme != nil && theme.HasIcon("edit-find-symbolic") {
+		searchEntry.SetIconFromIconName(gtk.ENTRY_ICON_PRIMARY, "edit-find-symbolic")
+	}
 	SetupEntryAccessibility(searchEntry, "Search titles", "Enter a game title or title ID to search. You can use the category buttons above to filter by type.")
 
 	queuePane, err := NewQueuePane()
@@ -925,10 +927,12 @@ func (mw *MainWindow) setupDonationBar() {
 	} else {
 		addStyleClass(button.GetStyleContext, "kofi-btn")
 
-		kofiIcon, _ := gtk.ImageNewFromIconName(supportMeIconName(), gtk.ICON_SIZE_BUTTON)
+		kofiIcon := imageFromIconName(supportMeIconName(), gtk.ICON_SIZE_BUTTON)
 		kofiLabel, _ := gtk.LabelNew("Buy me a coffee")
 		kofiBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		kofiBtnBox.PackStart(kofiIcon, false, false, 0)
+		if kofiIcon != nil {
+			kofiBtnBox.PackStart(kofiIcon, false, false, 0)
+		}
 		kofiBtnBox.PackStart(kofiLabel, false, false, 0)
 		button.Add(kofiBtnBox)
 
@@ -1022,10 +1026,11 @@ func (mw *MainWindow) showSuccessDialog(count int, downloadPath string, decryptO
 		addStyleClass(linkedBox.GetStyleContext, "linked")
 
 		dlBtn, _ := gtk.ButtonNew()
-		dlIcon, _ := gtk.ImageNewFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON)
-		dlLabel, _ := gtk.LabelNew("Open Downloads")
 		dlBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		dlBtnBox.PackStart(dlIcon, false, false, 0)
+		if dlIcon := imageFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON); dlIcon != nil {
+			dlBtnBox.PackStart(dlIcon, false, false, 0)
+		}
+		dlLabel, _ := gtk.LabelNew("Open Downloads")
 		dlBtnBox.PackStart(dlLabel, false, false, 0)
 		dlBtn.Add(dlBtnBox)
 		dlBtn.Connect("clicked", func() {
@@ -1034,10 +1039,11 @@ func (mw *MainWindow) showSuccessDialog(count int, downloadPath string, decryptO
 		linkedBox.PackStart(dlBtn, true, true, 0)
 
 		decBtn, _ := gtk.ButtonNew()
-		decIcon, _ := gtk.ImageNewFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON)
-		decLabel, _ := gtk.LabelNew("Open Decrypted")
 		decBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		decBtnBox.PackStart(decIcon, false, false, 0)
+		if decIcon := imageFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON); decIcon != nil {
+			decBtnBox.PackStart(decIcon, false, false, 0)
+		}
+		decLabel, _ := gtk.LabelNew("Open Decrypted")
 		decBtnBox.PackStart(decLabel, false, false, 0)
 		decBtn.Add(decBtnBox)
 		addStyleClass(decBtn.GetStyleContext, "suggested-action")
@@ -1053,10 +1059,11 @@ func (mw *MainWindow) showSuccessDialog(count int, downloadPath string, decryptO
 		openBtn.SetMarginBottom(12)
 		addStyleClass(openBtn.GetStyleContext, "suggested-action")
 
-		folderIcon, _ := gtk.ImageNewFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON)
 		folderLabel, _ := gtk.LabelNew("Open Download Folder")
 		openBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		openBtnBox.PackStart(folderIcon, false, false, 0)
+		if folderIcon := imageFromIconName("folder-open-symbolic", gtk.ICON_SIZE_BUTTON); folderIcon != nil {
+			openBtnBox.PackStart(folderIcon, false, false, 0)
+		}
 		openBtnBox.PackStart(folderLabel, false, false, 0)
 		openBtn.Add(openBtnBox)
 		openBtn.Connect("clicked", func() {
@@ -1086,10 +1093,12 @@ func (mw *MainWindow) showSuccessDialog(count int, downloadPath string, decryptO
 		addStyleClass(kofiBtn.GetStyleContext, "kofi-btn")
 		kofiBtn.SetHAlign(gtk.ALIGN_CENTER)
 
-		kofiIcon, _ := gtk.ImageNewFromIconName(supportMeIconName(), gtk.ICON_SIZE_BUTTON)
+		kofiIcon := imageFromIconName(supportMeIconName(), gtk.ICON_SIZE_BUTTON)
 		kofiLabel, _ := gtk.LabelNew("Buy me a coffee")
 		kofiBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
-		kofiBtnBox.PackStart(kofiIcon, false, false, 0)
+		if kofiIcon != nil {
+			kofiBtnBox.PackStart(kofiIcon, false, false, 0)
+		}
 		kofiBtnBox.PackStart(kofiLabel, false, false, 0)
 		kofiBtn.Add(kofiBtnBox)
 

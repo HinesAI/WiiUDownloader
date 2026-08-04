@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"log"
 	"sync/atomic"
 
@@ -18,15 +19,17 @@ const (
 )
 
 type DetailPane struct {
-	container   *gtk.Box
-	coverImage  *gtk.Image
-	nameLabel   *gtk.Label
-	metaLabel   *gtk.Label
-	sizeLabel   *gtk.Label
-	updateLabel *gtk.Label
-	dlcLabel    *gtk.Label
-	emptyLabel  *gtk.Label
-	contentBox  *gtk.Box
+	container     *gtk.Box
+	coverImage    *gtk.Image
+	nameLabel     *gtk.Label
+	metaLabel     *gtk.Label
+	sizeLabel     *gtk.Label
+	yearLabel     *gtk.Label
+	platformLabel *gtk.Label
+	updateLabel   *gtk.Label
+	dlcLabel      *gtk.Label
+	emptyLabel    *gtk.Label
+	contentBox    *gtk.Box
 
 	requestID uint64
 	sizeCache map[uint64]string
@@ -60,7 +63,6 @@ func NewDetailPane() (*DetailPane, error) {
 		return nil, err
 	}
 	contentBox.SetHAlign(gtk.ALIGN_FILL)
-	contentBox.SetNoShowAll(true)
 
 	coverImage, err := gtk.ImageNew()
 	if err != nil {
@@ -68,7 +70,7 @@ func NewDetailPane() (*DetailPane, error) {
 	}
 	coverImage.SetSizeRequest(DETAIL_COVER_SIZE, DETAIL_COVER_SIZE)
 	coverImage.SetHAlign(gtk.ALIGN_CENTER)
-	coverImage.SetFromIconName("image-x-generic", gtk.ICON_SIZE_DIALOG)
+	coverImage.SetPixelSize(DETAIL_COVER_SIZE)
 
 	nameLabel, err := gtk.LabelNew("")
 	if err != nil {
@@ -97,6 +99,20 @@ func NewDetailPane() (*DetailPane, error) {
 	sizeLabel.SetHAlign(gtk.ALIGN_START)
 	sizeLabel.SetLineWrap(true)
 
+	yearLabel, err := gtk.LabelNew("")
+	if err != nil {
+		return nil, err
+	}
+	yearLabel.SetHAlign(gtk.ALIGN_START)
+	yearLabel.SetLineWrap(true)
+
+	platformLabel, err := gtk.LabelNew("")
+	if err != nil {
+		return nil, err
+	}
+	platformLabel.SetHAlign(gtk.ALIGN_START)
+	platformLabel.SetLineWrap(true)
+
 	updateLabel, err := gtk.LabelNew("")
 	if err != nil {
 		return nil, err
@@ -117,23 +133,28 @@ func NewDetailPane() (*DetailPane, error) {
 	contentBox.PackStart(nameLabel, false, false, 0)
 	contentBox.PackStart(metaLabel, false, false, 0)
 	contentBox.PackStart(sizeLabel, false, false, 0)
+	contentBox.PackStart(yearLabel, false, false, 0)
+	contentBox.PackStart(platformLabel, false, false, 0)
 	contentBox.PackStart(updateLabel, false, false, 0)
 	contentBox.PackStart(dlcLabel, false, false, 0)
 
 	outer.PackStart(emptyLabel, true, true, 0)
 	outer.PackStart(contentBox, true, true, 0)
+	contentBox.Hide()
 
 	return &DetailPane{
-		container:   outer,
-		coverImage:  coverImage,
-		nameLabel:   nameLabel,
-		metaLabel:   metaLabel,
-		sizeLabel:   sizeLabel,
-		updateLabel: updateLabel,
-		dlcLabel:    dlcLabel,
-		emptyLabel:  emptyLabel,
-		contentBox:  contentBox,
-		sizeCache:   make(map[uint64]string),
+		container:     outer,
+		coverImage:    coverImage,
+		nameLabel:     nameLabel,
+		metaLabel:     metaLabel,
+		sizeLabel:     sizeLabel,
+		yearLabel:     yearLabel,
+		platformLabel: platformLabel,
+		updateLabel:   updateLabel,
+		dlcLabel:      dlcLabel,
+		emptyLabel:    emptyLabel,
+		contentBox:    contentBox,
+		sizeCache:     make(map[uint64]string),
 	}, nil
 }
 
@@ -157,16 +178,24 @@ func (dp *DetailPane) ShowEntry(entry wiiudownloader.TitleEntry, fetchSize func(
 
 	dp.emptyLabel.Hide()
 	dp.contentBox.Show()
-	dp.contentBox.ShowAll()
+	dp.coverImage.Show()
+	dp.nameLabel.Show()
+	dp.metaLabel.Show()
+	dp.sizeLabel.Show()
+	dp.yearLabel.Show()
+	dp.platformLabel.Show()
 
-	dp.nameLabel.SetMarkup(fmt.Sprintf("<span weight='bold'>%s</span>", escapeMarkup(entry.Name)))
+	dp.nameLabel.SetMarkup(fmt.Sprintf("<span weight='bold' size='large'>%s</span>", escapeMarkup(entry.Name)))
 	dp.metaLabel.SetText(fmt.Sprintf("%s · %s\n%016X",
 		wiiudownloader.GetFormattedKind(entry.TitleID),
 		wiiudownloader.GetFormattedRegion(entry.Region),
 		entry.TitleID,
 	))
 
+	dp.coverImage.Clear()
 	dp.coverImage.SetFromIconName("image-x-generic", gtk.ICON_SIZE_DIALOG)
+	dp.yearLabel.SetMarkup("<b>Year:</b> Loading…")
+	dp.platformLabel.SetMarkup("<b>System:</b> Loading…")
 	dp.setRelatedLabels(entry)
 
 	if cached, ok := dp.sizeCache[entry.TitleID]; ok {
@@ -177,6 +206,7 @@ func (dp *DetailPane) ShowEntry(entry wiiudownloader.TitleEntry, fetchSize func(
 	}
 
 	go dp.loadCover(reqID, entry.TitleID)
+	go dp.loadGameTDBMeta(reqID, entry)
 }
 
 func (dp *DetailPane) setRelatedLabels(entry wiiudownloader.TitleEntry) {
@@ -245,8 +275,32 @@ func (dp *DetailPane) loadSize(reqID, titleID uint64, fetchSize func(uint64) (ui
 	})
 }
 
+func (dp *DetailPane) loadGameTDBMeta(reqID uint64, entry wiiudownloader.TitleEntry) {
+	meta, ok := lookupGameTDBMeta(entry)
+	uiIdleAdd(func() {
+		if atomic.LoadUint64(&dp.requestID) != reqID {
+			return
+		}
+		if !ok {
+			dp.yearLabel.SetMarkup("<b>Year:</b> Unknown")
+			dp.platformLabel.SetMarkup("<b>System:</b> Unknown")
+			return
+		}
+		if meta.Year != "" {
+			dp.yearLabel.SetMarkup(fmt.Sprintf("<b>Year:</b> %s", escapeMarkup(meta.Year)))
+		} else {
+			dp.yearLabel.SetMarkup("<b>Year:</b> Unknown")
+		}
+		if meta.Platform != "" {
+			dp.platformLabel.SetMarkup(fmt.Sprintf("<b>System:</b> %s", escapeMarkup(meta.Platform)))
+		} else {
+			dp.platformLabel.SetMarkup("<b>System:</b> Unknown")
+		}
+	})
+}
+
 func (dp *DetailPane) loadCover(reqID, titleID uint64) {
-	pngData, err := fetchTitleCoverPNG(titleID)
+	img, err := fetchTitleCoverImage(titleID)
 	uiIdleAdd(func() {
 		if atomic.LoadUint64(&dp.requestID) != reqID {
 			return
@@ -256,22 +310,9 @@ func (dp *DetailPane) loadCover(reqID, titleID uint64) {
 			dp.coverImage.SetFromIconName("image-missing", gtk.ICON_SIZE_DIALOG)
 			return
 		}
-		loader, loaderErr := gdk.PixbufLoaderNew()
-		if loaderErr != nil {
-			dp.coverImage.SetFromIconName("image-missing", gtk.ICON_SIZE_DIALOG)
-			return
-		}
-		if _, writeErr := loader.Write(pngData); writeErr != nil {
-			_ = loader.Close()
-			dp.coverImage.SetFromIconName("image-missing", gtk.ICON_SIZE_DIALOG)
-			return
-		}
-		if closeErr := loader.Close(); closeErr != nil {
-			dp.coverImage.SetFromIconName("image-missing", gtk.ICON_SIZE_DIALOG)
-			return
-		}
-		pixbuf, pixbufErr := loader.GetPixbuf()
+		pixbuf, pixbufErr := pixbufFromImage(img)
 		if pixbufErr != nil || pixbuf == nil {
+			log.Printf("detail cover pixbuf failed for %016x: %v", titleID, pixbufErr)
 			dp.coverImage.SetFromIconName("image-missing", gtk.ICON_SIZE_DIALOG)
 			return
 		}
@@ -282,4 +323,19 @@ func (dp *DetailPane) loadCover(reqID, titleID uint64) {
 		}
 		dp.coverImage.SetFromPixbuf(scaled)
 	})
+}
+
+// pixbufFromImage builds a GdkPixbuf from raw pixels so we do not depend on
+// gdk-pixbuf PNG loaders (often missing from the macOS app bundle module cache).
+func pixbufFromImage(img image.Image) (*gdk.Pixbuf, error) {
+	nrgba := imageToNRGBA(img)
+	bounds := nrgba.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("invalid image size")
+	}
+	pix := make([]byte, len(nrgba.Pix))
+	copy(pix, nrgba.Pix)
+	return gdk.PixbufNewFromData(pix, gdk.COLORSPACE_RGB, true, 8, width, height, nrgba.Stride)
 }
