@@ -211,3 +211,12 @@ func GetTitleEntryFromTid(tid uint64) TitleEntry {
 	}
 	return TitleEntry{}
 }
+
+// FindRelatedUpdateAndDLC returns the best-matching update and DLC entries for a title,
+// if they exist in the title database. Either result may be missing.
+func FindRelatedUpdateAndDLC(source TitleEntry) (update TitleEntry, hasUpdate bool, dlc TitleEntry, hasDLC bool) {
+	exclude := map[uint64]struct{}{source.TitleID: {}}
+	update, hasUpdate = FindRelatedTitleByHighAndLow(source, TID_HIGH_UPDATE, exclude)
+	dlc, hasDLC = FindRelatedTitleByHighAndLow(source, TID_HIGH_DLC, exclude)
+	return update, hasUpdate, dlc, hasDLC
+}

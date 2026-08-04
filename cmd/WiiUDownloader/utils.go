@@ -192,6 +192,11 @@ func applyStyling() {
 	.queue-pane-vbox {
 		background: @theme_bg_color;
 	}
+	.detail-pane {
+		border-left: 1px solid shade(@theme_bg_color, 0.85);
+		padding: 8px 4px;
+		background: @theme_bg_color;
+	}
 	notebook {
 		padding: 0;
 	}

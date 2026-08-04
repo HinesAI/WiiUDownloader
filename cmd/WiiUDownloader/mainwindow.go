@@ -31,14 +31,15 @@ const (
 )
 
 const (
-	MAIN_WINDOW_WIDTH        = 870
-	MAIN_WINDOW_HEIGHT       = 460
+	MAIN_WINDOW_WIDTH        = 1100
+	MAIN_WINDOW_HEIGHT       = 520
 	SEARCH_ENTRY_WIDTH_CHARS = 18
 
 	UI_MARGIN_SMALL               = 6
 	SPLIT_PANE_MARGIN             = 2
 	DOWNLOAD_PANE_MIN_WIDTH       = 300
 	QUEUE_PANE_MIN_WIDTH          = 200
+	DETAIL_PANE_MIN_WIDTH         = 220
 	SEARCH_DEBOUNCE_DELAY         = 200 * time.Millisecond
 	PARSE_UINT_BASE_16            = 16
 	PARSE_UINT_BITS_64            = 64
@@ -57,6 +58,7 @@ const (
 type MainWindow struct {
 	window                          *gtk.Window
 	queuePane                       *QueuePane
+	detailPane                      *DetailPane
 	treeView                        *gtk.TreeView
 	searchEntry                     *gtk.Entry
 	downloadQueueButton             *gtk.Button
@@ -121,9 +123,15 @@ func NewMainWindow(entries []wiiudownloader.TitleEntry, client *http.Client, con
 		log.Fatalln("Unable to create queue pane:", err)
 	}
 
+	detailPane, err := NewDetailPane()
+	if err != nil {
+		log.Fatalln("Unable to create detail pane:", err)
+	}
+
 	mainWindow := MainWindow{
 		window:             win,
 		queuePane:          queuePane,
+		detailPane:         detailPane,
 		titles:             entries,
 		searchEntry:        searchEntry,
 		currentRegion:      wiiudownloader.MCP_REGION_EUROPE | wiiudownloader.MCP_REGION_JAPAN | wiiudownloader.MCP_REGION_USA,
@@ -340,6 +348,7 @@ func (mw *MainWindow) BuildUI() {
 		}
 		return mw.toggleQueueFromKeyboard()
 	})
+	mw.treeView.Connect("cursor-changed", mw.onTreeCursorChanged)
 	mw.ensureTreeViewCursor()
 	mw.window.SetFocusChild(mw.treeView.ToWidget())
 
@@ -571,7 +580,15 @@ func (mw *MainWindow) BuildUI() {
 	scrollable.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
 	scrollable.Add(mw.treeView)
 
-	mainvBox.PackStart(scrollable, true, true, 0)
+	contentPaned, err := gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
+	if err != nil {
+		log.Fatalln("Unable to create content paned:", err)
+	}
+	contentPaned.Pack1(scrollable, true, true)
+	mw.detailPane.GetContainer().SetSizeRequest(DETAIL_PANE_MIN_WIDTH, -1)
+	contentPaned.Pack2(mw.detailPane.GetContainer(), false, false)
+
+	mainvBox.PackStart(contentPaned, true, true, 0)
 
 	bottomhBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
 	if err != nil {
@@ -677,6 +694,7 @@ func (mw *MainWindow) BuildUI() {
 
 	splitPane.SetPosition(280) // Set default width for QueuePane
 	splitPane.ShowAll()
+	mw.onTreeCursorChanged()
 }
 
 func (mw *MainWindow) onDownloadQueueButtonClicked() {
@@ -1273,6 +1291,45 @@ func (mw *MainWindow) ensureTreeViewCursor() bool {
 
 	mw.treeView.SetCursor(firstPath, nil, false)
 	return true
+}
+
+func (mw *MainWindow) onTreeCursorChanged() {
+	if mw.detailPane == nil || mw.treeView == nil {
+		return
+	}
+	entry, ok := mw.getTitleEntryFromCursor()
+	if !ok {
+		mw.detailPane.Clear()
+		return
+	}
+	mw.detailPane.ShowEntry(entry, func(titleID uint64) (uint64, error) {
+		mw.sizeFetchSemaphore <- struct{}{}
+		defer func() { <-mw.sizeFetchSemaphore }()
+		return fetchTMDSize(titleID, mw.client)
+	})
+}
+
+func (mw *MainWindow) getTitleEntryFromCursor() (wiiudownloader.TitleEntry, bool) {
+	if mw.treeView == nil || mw.sortModel == nil || mw.filterModel == nil || mw.childStore == nil {
+		return wiiudownloader.TitleEntry{}, false
+	}
+	sortPath, _ := mw.treeView.GetCursor()
+	if sortPath == nil {
+		return wiiudownloader.TitleEntry{}, false
+	}
+	filterPath := mw.sortModel.ConvertPathToChildPath(sortPath)
+	if filterPath == nil {
+		return wiiudownloader.TitleEntry{}, false
+	}
+	childPath := mw.filterModel.ConvertPathToChildPath(filterPath)
+	if childPath == nil {
+		return wiiudownloader.TitleEntry{}, false
+	}
+	childIter, err := mw.childStore.ToTreeModel().GetIter(childPath)
+	if err != nil {
+		return wiiudownloader.TitleEntry{}, false
+	}
+	return mw.getTitleEntryFromChildIter(childIter)
 }
 
 func (mw *MainWindow) collectRelatedCandidates(originals []wiiudownloader.TitleEntry) []wiiudownloader.TitleEntry {
