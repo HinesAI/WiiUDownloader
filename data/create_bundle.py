@@ -142,21 +142,87 @@ shutil.copy("data/Info.plist", os.path.join(contents_path, "Info.plist"))
 shutil.copy(executable_path, os.path.join(macos_path, "WiiUDownloader"))
 os.chmod(os.path.join(macos_path, "WiiUDownloader"), 0o755)
 
-# Generate ICNS (Pillow — sips/iconutil crash on some macOS/PNG combos)
-print("=== Generating Icon ===")
-icon_src = "data/WiiUDownloader.png"
-if os.path.exists(icon_src):
+def generate_app_icon(icon_src: str, icns_dest: str) -> None:
+    """Create Resources/WiiUDownloader.icns for Finder / Dock / DMG."""
+    if not os.path.exists(icon_src):
+        raise FileNotFoundError(f"App icon source not found: {icon_src}")
+
+    os.makedirs(os.path.dirname(icns_dest), exist_ok=True)
+    errors: list[str] = []
+
+    # Prefer native iconutil (available on macOS runners; no Python deps).
+    iconset = icns_dest + ".iconset"
+    try:
+        if os.path.exists(iconset):
+            shutil.rmtree(iconset)
+        os.makedirs(iconset)
+        mapping = [
+            (16, "icon_16x16.png"),
+            (32, "icon_16x16@2x.png"),
+            (32, "icon_32x32.png"),
+            (64, "icon_32x32@2x.png"),
+            (128, "icon_128x128.png"),
+            (256, "icon_128x128@2x.png"),
+            (256, "icon_256x256.png"),
+            (512, "icon_256x256@2x.png"),
+            (512, "icon_512x512.png"),
+            (1024, "icon_512x512@2x.png"),
+        ]
+        for px, name in mapping:
+            out = os.path.join(iconset, name)
+            res = subprocess.run(
+                ["sips", "-z", str(px), str(px), icon_src, "--out", out],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode != 0:
+                raise RuntimeError(res.stderr.strip() or res.stdout.strip() or "sips failed")
+        res = subprocess.run(
+            ["iconutil", "-c", "icns", iconset, "-o", icns_dest],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(res.stderr.strip() or res.stdout.strip() or "iconutil failed")
+        if os.path.exists(icns_dest) and os.path.getsize(icns_dest) > 0:
+            print(f"Icon created via iconutil ({os.path.getsize(icns_dest)} bytes).")
+            return
+        raise RuntimeError("iconutil produced empty icns")
+    except FileNotFoundError as e:
+        errors.append(f"iconutil/sips unavailable: {e}")
+    except Exception as e:
+        errors.append(f"iconutil path failed: {e}")
+    finally:
+        if os.path.exists(iconset):
+            shutil.rmtree(iconset, ignore_errors=True)
+
+    # Fallback: Pillow
     try:
         from PIL import Image
 
         img = Image.open(icon_src).convert("RGBA")
-        icns_dest = os.path.join(resources_path, "WiiUDownloader.icns")
-        img.save(icns_dest, format="ICNS")
-        print(f"Icon created and installed ({os.path.getsize(icns_dest)} bytes).")
+        sizes_px = [16, 32, 64, 128, 256, 512, 1024]
+        imgs = [img.resize((px, px), Image.Resampling.LANCZOS) for px in sizes_px]
+        imgs[0].save(icns_dest, format="ICNS", append_images=imgs[1:])
+        if os.path.exists(icns_dest) and os.path.getsize(icns_dest) > 0:
+            print(f"Icon created via Pillow ({os.path.getsize(icns_dest)} bytes).")
+            return
+        raise RuntimeError("Pillow produced empty icns")
     except Exception as e:
-        print(f"Error: Failed to create icns file: {e}")
-else:
-    print(f"Warning: {icon_src} not found")
+        errors.append(f"Pillow path failed: {e}")
+
+    raise RuntimeError("Could not create app icon:\n- " + "\n- ".join(errors))
+
+
+# Generate ICNS (required for Finder / Dock / DMG logo)
+print("=== Generating Icon ===")
+icon_src = "data/WiiUDownloader.png"
+icns_dest = os.path.join(resources_path, "WiiUDownloader.icns")
+try:
+    generate_app_icon(icon_src, icns_dest)
+except Exception as e:
+    print(f"Error: {e}")
+    sys.exit(1)
 
 # 1. Recursive Bundle (Manual)
 processed = set()

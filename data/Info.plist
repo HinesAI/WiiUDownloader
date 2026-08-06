@@ -13,7 +13,7 @@
     <key>CFBundleGetInfoString</key>
     <string>1.1, based on WiiUDownloader 2.99 by Xpl0itU; maintained by HinesAI</string>
     <key>CFBundleIconFile</key>
-    <string>WiiUDownloader.icns</string>
+    <string>WiiUDownloader</string>
     <key>CFBundleIdentifier</key>
     <string>io.github.hinesai.WiiUDownloaderFork</string>
     <key>CFBundleInfoDictionaryVersion</key>
