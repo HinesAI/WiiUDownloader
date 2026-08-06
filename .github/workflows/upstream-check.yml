@@ -39,7 +39,11 @@ jobs:
           LABEL="upstream-sync"
           REPORT_FILE=upstream-report.txt
 
-          gh label create "$LABEL" --color "0052CC" --description "Monthly upstream Xpl0itU sync review" 2>/dev/null || true
+          # gh label is unavailable on older CLI; create via API
+          gh api --method POST "repos/${{ github.repository }}/labels" \
+            -f name="$LABEL" \
+            -f color="0052CC" \
+            -f description="Monthly upstream Xpl0itU sync review" >/dev/null 2>&1 || true
 
           {
             echo "## Monthly upstream check"
@@ -73,10 +77,17 @@ jobs:
             echo "</details>"
           } > issue-body.md
 
-          EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+          EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          if [[ -z "$EXISTING" ]]; then
+            EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          fi
           if [[ -n "$EXISTING" ]]; then
             gh issue comment "$EXISTING" --body-file issue-body.md
             echo "Updated issue #$EXISTING"
           else
-            gh issue create --title "$TITLE" --label "$LABEL" --body-file issue-body.md
+            URL=$(gh issue create --title "$TITLE" --body-file issue-body.md)
+            echo "Created $URL"
+            NUM="${URL##*/}"
+            gh api --method POST "repos/${{ github.repository }}/issues/${NUM}/labels" \
+              -f "labels[]=$LABEL" >/dev/null 2>&1 || true
           fi
