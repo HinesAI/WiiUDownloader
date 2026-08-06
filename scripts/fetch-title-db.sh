@@ -19,12 +19,18 @@ if ! download; then
   download insecure
 fi
 
+# BSD sed (macOS) needs sed -i ''; GNU sed accepts sed -i
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  sed_i() { sed -i '' "$@"; }
+else
+  sed_i() { sed -i "$@"; }
+fi
+
 if grep -q 'var titleEntry =' "$OUT"; then
   if grep -q 'type TitleEntry struct' "$OUT"; then
-    # portable in-place edit for Linux + MSYS sed
-    sed -i '/type TitleEntry struct/,/}/d' "$OUT"
+    sed_i '/type TitleEntry struct/,/}/d' "$OUT"
   fi
-  sed -i 's/var titleEntry =/func init() { TitleDatabase =/' "$OUT"
+  sed_i 's/var titleEntry =/func init() { TitleDatabase =/' "$OUT"
   echo '}' >> "$OUT"
 fi
 
