@@ -1,0 +1,82 @@
+name: Upstream check
+
+on:
+  schedule:
+    # 1st of each month at 14:00 UTC
+    - cron: "0 14 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compare with upstream
+        id: compare
+        run: |
+          chmod +x scripts/check-upstream.sh
+          scripts/check-upstream.sh | tee upstream-report.txt
+          status=$(grep -E '^status=' upstream-report.txt | tail -1 | cut -d= -f2- || echo unknown)
+          ahead=$(grep -E '^upstream_commits_since_base=' upstream-report.txt | tail -1 | cut -d= -f2- || echo 0)
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STATUS="${{ steps.compare.outputs.status }}"
+          AHEAD="${{ steps.compare.outputs.ahead }}"
+          TITLE="Monthly upstream review — Xpl0itU/WiiUDownloader"
+          LABEL="upstream-sync"
+          REPORT_FILE=upstream-report.txt
+
+          gh label create "$LABEL" --color "0052CC" --description "Monthly upstream Xpl0itU sync review" 2>/dev/null || true
+
+          {
+            echo "## Monthly upstream check"
+            echo
+            echo "Automated compare of **HinesAI/WiiUDownloader** against **Xpl0itU/WiiUDownloader**."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Status | \`${STATUS}\` |"
+            echo "| Upstream commits since merge-base | \`${AHEAD}\` |"
+            echo "| Checked at | $(date -u +%Y-%m-%dT%H:%MZ) |"
+            echo "| Workflow run | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |"
+            echo
+            echo "### What to do"
+            echo "1. Skim the commit list and diffstat below."
+            echo "2. Choose **merge**, **selective port**, or **skip**."
+            echo "3. Comment the decision on this issue (and link a PR if you open one)."
+            echo "4. Close when the review is done for this month."
+            echo
+            echo "**Merge** if changes are compatible with our fork (UI/branding/CI)."
+            echo "**Port** individual fixes/features when a full merge would be noisy or conflicting."
+            echo "**Skip** if nothing relevant."
+            echo
+            echo "<details>"
+            echo "<summary>Upstream report</summary>"
+            echo
+            echo '```'
+            cat "$REPORT_FILE"
+            echo '```'
+            echo
+            echo "</details>"
+          } > issue-body.md
+
+          EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$EXISTING" ]]; then
+            gh issue comment "$EXISTING" --body-file issue-body.md
+            echo "Updated issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --label "$LABEL" --body-file issue-body.md
+          fi
