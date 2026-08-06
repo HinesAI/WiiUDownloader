@@ -3,6 +3,7 @@ on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -63,7 +64,14 @@ jobs:
           cd dist
           rm -f "libx265-*.dll"
           zip -9 -r ../WiiUDownloader-Windows.zip .
-      - name: Upload Windows Artifact
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiiUDownloader-Windows
+          path: WiiUDownloader-Windows.zip
+          if-no-files-found: error
+      - name: Upload Windows Artifact to Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: True
