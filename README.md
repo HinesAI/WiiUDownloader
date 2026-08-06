@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jayhines91/WiiUDownloader/releases/latest"><img src="https://img.shields.io/github/v/release/jayhines91/WiiUDownloader?label=HinesAI%20fork" alt="Latest HinesAI fork release"></a>
-  <a href="https://github.com/jayhines91/WiiUDownloader/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jayhines91/WiiUDownloader" alt="License: GPLv3"></a>
+  <a href="https://github.com/HinesAI/WiiUDownloader/releases/latest"><img src="https://img.shields.io/github/v/release/HinesAI/WiiUDownloader?label=HinesAI%20fork" alt="Latest HinesAI fork release"></a>
+  <a href="https://github.com/HinesAI/WiiUDownloader/blob/main/LICENSE"><img src="https://img.shields.io/github/license/HinesAI/WiiUDownloader" alt="License: GPLv3"></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platforms: Windows, macOS, Linux">
-  <a href="https://github.com/jayhines91/WiiUDownloader/stargazers"><img src="https://img.shields.io/github/stars/jayhines91/WiiUDownloader" alt="GitHub stars"></a>
+  <a href="https://github.com/HinesAI/WiiUDownloader/stargazers"><img src="https://img.shields.io/github/stars/HinesAI/WiiUDownloader" alt="GitHub stars"></a>
   <a href="https://ko-fi.com/L3L5JUPXR"><img src="https://img.shields.io/badge/Ko--fi-Support%20Xpl0itU-ff5e5b?logo=ko-fi&logoColor=white" alt="Support the original creator on Ko-fi"></a>
 </p>
 
@@ -79,10 +79,10 @@ Pick your platform. Double-click. Done.
 
 | Platform | Download |
 |---|---|
-| **Windows** | [WiiUDownloader-Windows.zip](https://github.com/jayhines91/WiiUDownloader/releases/latest/download/WiiUDownloader-Windows.zip) |
-| **macOS** (Intel + Apple Silicon) | [WiiUDownloader-macOS-Universal.dmg](https://github.com/jayhines91/WiiUDownloader/releases/latest/download/WiiUDownloader-macOS-Universal.dmg) |
-| **Linux** (Intel/AMD 64-bit) | [WiiUDownloader-Linux-x86_64.AppImage](https://github.com/jayhines91/WiiUDownloader/releases/latest/download/WiiUDownloader-Linux-x86_64.AppImage) |
-| **Linux** (ARM 64-bit) | [WiiUDownloader-Linux-aarch64.AppImage](https://github.com/jayhines91/WiiUDownloader/releases/latest/download/WiiUDownloader-Linux-aarch64.AppImage) |
+| **Windows** | [WiiUDownloader-Windows.zip](https://github.com/HinesAI/WiiUDownloader/releases/latest/download/WiiUDownloader-Windows.zip) |
+| **macOS** (Intel + Apple Silicon) | [WiiUDownloader-macOS-Universal.dmg](https://github.com/HinesAI/WiiUDownloader/releases/latest/download/WiiUDownloader-macOS-Universal.dmg) |
+| **Linux** (Intel/AMD 64-bit) | [WiiUDownloader-Linux-x86_64.AppImage](https://github.com/HinesAI/WiiUDownloader/releases/latest/download/WiiUDownloader-Linux-x86_64.AppImage) |
+| **Linux** (ARM 64-bit) | [WiiUDownloader-Linux-aarch64.AppImage](https://github.com/HinesAI/WiiUDownloader/releases/latest/download/WiiUDownloader-Linux-aarch64.AppImage) |
 
 **Linux users:** make the AppImage executable before running:
 
@@ -158,7 +158,7 @@ Stop fighting with it. Wii U USB Helper is abandoned, it hasn't been updated in 
 ## Building from source
 
 ```bash
-git clone https://github.com/jayhines91/WiiUDownloader.git
+git clone https://github.com/HinesAI/WiiUDownloader.git
 cd WiiUDownloader
 curl -Lo db.go -H 'User-Agent: NUSspliBuilder/2.1' 'https://napi.v10lator.de/db?t=go' && if grep -q 'var titleEntry =' db.go; then if grep -q 'type TitleEntry struct' db.go; then sed -i '/type TitleEntry struct/,/}/d' db.go; fi && sed -i 's/var titleEntry =/func init() { TitleDatabase =/' db.go && echo '}' >> db.go; fi
 cd cmd/WiiUDownloader && go build -o ../../WiiUDownloader .
