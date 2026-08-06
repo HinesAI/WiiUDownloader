@@ -51,22 +51,16 @@ jobs:
           path: upstream-report.txt
           if-no-files-found: error
 
-      - name: Open or update tracking issue
+      - name: Update tracking issue
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.UPSTREAM_CHECK_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           STATUS="${{ steps.compare.outputs.status }}"
           AHEAD="${{ steps.compare.outputs.ahead }}"
-          TITLE="Monthly upstream review — Xpl0itU/WiiUDownloader"
           LABEL="upstream-sync"
           REPORT_FILE=upstream-report.txt
-
-          # Prefer API label create (works without `gh label` subcommand)
-          gh api --method POST "repos/${{ github.repository }}/labels" \
-            -f name="$LABEL" \
-            -f color="0052CC" \
-            -f description="Monthly upstream Xpl0itU sync review" >/dev/null 2>&1 || true
+          REPO="${{ github.repository }}"
 
           {
             echo "## Monthly upstream check"
@@ -100,17 +94,14 @@ jobs:
             echo "</details>"
           } > issue-body.md
 
-          EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+          # Prefer commenting on an existing upstream-sync issue (Actions often cannot create issues).
+          EXISTING=$(gh api "repos/${REPO}/issues?state=open&labels=${LABEL}&per_page=1" --jq '.[0].number // empty')
           if [[ -z "$EXISTING" ]]; then
-            EXISTING=$(gh issue list --state open --search "Monthly upstream review in:title" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+            echo "No open #${LABEL} issue found; skipping issue update."
+            echo "Create one once (see docs/UPSTREAM.md), or set secret UPSTREAM_CHECK_TOKEN with issues:write."
+            exit 0
           fi
-          if [[ -n "$EXISTING" ]]; then
-            gh issue comment "$EXISTING" --body-file issue-body.md
-            echo "Updated issue #$EXISTING"
-          else
-            URL=$(gh issue create --title "$TITLE" --body-file issue-body.md)
-            echo "Created $URL"
-            NUM="${URL##*/}"
-            gh api --method POST "repos/${{ github.repository }}/issues/${NUM}/labels" \
-              -f "labels[]=$LABEL" >/dev/null 2>&1 || true
-          fi
+
+          gh api --method POST "repos/${REPO}/issues/${EXISTING}/comments" \
+            -F body=@issue-body.md
+          echo "Commented on issue #${EXISTING}"
