@@ -7,10 +7,14 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	wiiudownloader "github.com/Xpl0itU/WiiUDownloader"
 	"github.com/gotk3/gotk3/gdk"
+	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 )
 
@@ -32,9 +36,12 @@ func formatBytes(bytes uint64) string {
 	return fmt.Sprintf("%.2f %s", value, units[unitIndex])
 }
 
-func fetchTMDSize(titleID uint64, client *http.Client) (uint64, error) {
+func fetchTMDSize(titleID uint64, version int, client *http.Client) (uint64, error) {
 	baseURL := fmt.Sprintf("http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/%016x", titleID)
 	tmdURL := fmt.Sprintf("%s/tmd", baseURL)
+	if version > 0 {
+		tmdURL = fmt.Sprintf("%s/tmd.%d", baseURL, version)
+	}
 
 	resp, err := client.Get(tmdURL)
 	if err != nil {
@@ -92,16 +99,55 @@ func normalizeFilename(filename string) string {
 	return result
 }
 
+
+var desiredDark atomic.Bool
+var guardConnected sync.Once
+
 func setDarkTheme(darkMode bool) {
+	desiredDark.Store(darkMode)
+
+	if runtime.GOOS == "darwin" {
+		if darkMode {
+			os.Setenv("GTK_THEME", "Adwaita:dark")
+		} else {
+			os.Setenv("GTK_THEME", "Adwaita")
+		}
+	}
+
 	gSettings, err := gtk.SettingsGetDefault()
-	if err != nil {
-		log.Println(err.Error())
+	if err != nil || gSettings == nil {
 		return
 	}
-	if gSettings == nil {
-		return
-	}
+
 	gSettings.SetProperty("gtk-application-prefer-dark-theme", darkMode)
+	gSettings.SetProperty("gtk-theme-name", "Adwaita")
+
+	if runtime.GOOS == "darwin" {
+		guardConnected.Do(func() {
+			gSettings.Connect("notify::gtk-theme-name", func() {
+				if cur := readThemeName(gSettings); cur == "Adwaita" {
+					return
+				}
+				gSettings.SetProperty("gtk-theme-name", "Adwaita")
+			})
+		})
+	}
+}
+
+func readThemeName(s *gtk.Settings) string {
+	v, err := s.GetProperty("gtk-theme-name")
+	if err != nil {
+		return ""
+	}
+	switch x := v.(type) {
+	case string:
+		return x
+	case *glib.Value:
+		if str, err := x.GetString(); err == nil {
+			return str
+		}
+	}
+	return ""
 }
 
 func applyStyling() {
@@ -162,7 +208,7 @@ func applyStyling() {
 	button.kofi-btn {
 		background-image: none;
 		background-color: #ff813f;
-		color: white;
+		color: #ffffff;
 		font-weight: bold;
 		border-radius: 8px;
 		padding: 6px 16px;
@@ -171,7 +217,15 @@ func applyStyling() {
 	}
 	button.kofi-btn:hover {
 		background-image: none;
-		background-color: shade(#ff813f, 1.15);
+		background-color: #ff9359;
+	}
+	.kofi-btn {
+		box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+	}
+	.supporter-count {
+		font-size: 0.9em;
+		color: @theme_unfocused_fg_color;
+		margin-left: 8px;
 	}
 	.donation-highlight {
 		border-top: 2px solid #00a2ed;
@@ -192,12 +246,45 @@ func applyStyling() {
 	.queue-pane-vbox {
 		background: @theme_bg_color;
 	}
+	.detail-pane {
+		border-left: 1px solid shade(@theme_bg_color, 0.85);
+		padding: 8px 4px;
+		background: @theme_bg_color;
+	}
 	notebook {
 		padding: 0;
 	}
 	notebook stack {
 		background: @theme_bg_color;
 		padding: 12px;
+	}
+	.title {
+		font-size: 1.2em;
+		font-weight: 500;
+	}
+	.subtitle {
+		font-size: 0.95em;
+		color: @theme_unfocused_fg_color;
+	}
+	.dim-label {
+		color: @theme_unfocused_fg_color;
+		opacity: 0.7;
+	}
+	.sidebar {
+		background-color: @theme_bg_color;
+		border-right: 1px solid shade(@theme_bg_color, 0.9);
+	}
+	.linked button {
+		border-radius: 0;
+	}
+	.linked button:first-child {
+		border-top-left-radius: 6px;
+		border-bottom-left-radius: 6px;
+	}
+	.linked button:last-child {
+		border-top-right-radius: 6px;
+		border-bottom-right-radius: 6px;
+		border-left: none;
 	}
 	`
 
@@ -238,6 +325,32 @@ func escapeMarkup(text string) string {
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	text = strings.ReplaceAll(text, "\"", "&quot;")
 	return text
+}
+
+func queueDownloadIconName() string {
+	return "folder-download-symbolic"
+}
+
+func supportMeIconName() string {
+	return "starred-symbolic"
+}
+
+// imageFromIconName returns a GTK image only when the icon theme actually has
+// the named icon. Missing symbolic icons otherwise render as a broken-image
+// placeholder (common when Adwaita isn't bundled on macOS).
+func imageFromIconName(iconName string, size gtk.IconSize) *gtk.Image {
+	if iconName == "" {
+		return nil
+	}
+	theme, err := gtk.IconThemeGetDefault()
+	if err != nil || theme == nil || !theme.HasIcon(iconName) {
+		return nil
+	}
+	img, err := gtk.ImageNewFromIconName(iconName, size)
+	if err != nil {
+		return nil
+	}
+	return img
 }
 
 func detectErrorType(errorMsg string) string {

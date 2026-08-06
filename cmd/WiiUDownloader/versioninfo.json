@@ -1,14 +1,14 @@
 {
     "FixedFileInfo": {
         "FileVersion": {
-            "Major": 2,
-            "Minor": 92,
+            "Major": 1,
+            "Minor": 1,
             "Patch": 0,
             "Build": 0
         },
         "ProductVersion": {
-            "Major": 2,
-            "Minor": 92,
+            "Major": 1,
+            "Minor": 1,
             "Patch": 0,
             "Build": 0
         },
@@ -19,14 +19,14 @@
         "FileSubType": "00"
     },
     "StringFileInfo": {
-        "CompanyName": "Xpl0itU",
-        "FileDescription": "WiiUDownloader",
-        "FileVersion": "2.92",
-        "InternalName": "WiiUDownloader",
-        "LegalCopyright": "Copyright 2022-2026 Xpl0itU",
+        "CompanyName": "HinesAI",
+        "FileDescription": "WiiUDownloader Forked by HinesAI",
+        "FileVersion": "1.1.0",
+        "InternalName": "WiiUDownloader-HinesAI",
+        "LegalCopyright": "Copyright 2022-2026 Xpl0itU; fork maintained by HinesAI",
         "OriginalFilename": "WiiUDownloader.exe",
-        "ProductName": "WiiUDownloader",
-        "ProductVersion": "2.92"
+        "ProductName": "WiiUDownloader Forked by HinesAI",
+        "ProductVersion": "1.1.0"
     },
     "IconPath": "WiiUDownloader.ico",
     "VarFileInfo": {

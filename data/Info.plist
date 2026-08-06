@@ -6,25 +6,29 @@
     <string>English</string>
     <key>CFBundleExecutable</key>
     <string>WiiUDownloader</string>
+    <key>CFBundleName</key>
+    <string>WiiUDownloader HinesAI</string>
+    <key>CFBundleDisplayName</key>
+    <string>WiiUDownloader Forked by HinesAI</string>
     <key>CFBundleGetInfoString</key>
-    <string>2.92, Copyright 2022-2026 Xpl0itU</string>
+    <string>1.1, based on WiiUDownloader 2.99 by Xpl0itU; maintained by HinesAI</string>
     <key>CFBundleIconFile</key>
     <string>WiiUDownloader.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>com.Xpl0itU.WiiUDownloader</string>
+    <string>io.github.hinesai.WiiUDownloaderFork</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.92</string>
+    <string>1.1</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleVersion</key>
-    <string>2.92</string>
+    <string>1.1</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright 2022-2026 Xpl0itU, GNU General Public License Version 3.</string>
+    <string>Copyright 2022-2026 Xpl0itU; fork maintained by HinesAI. GNU General Public License Version 3.</string>
     <key>LSMinimumSystemVersion</key>
-    <string>15.0</string>
+    <string>11.0</string>
 </dict>
 </plist>

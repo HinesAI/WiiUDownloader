@@ -7,13 +7,16 @@ on:
 permissions:
   contents: write
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
 jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-15-intel, macos-15]
+        os: [macos-15-intel, macos-14]
     steps:
       - name: Check out repository code
         uses: actions/checkout@v6
@@ -22,11 +25,11 @@ jobs:
       - name: Install Homebrew Dependencies
         uses: tecolicom/actions-use-homebrew-tools@v1
         with:
-          tools: create-dmg dylibbundler gtk+3
+          tools: create-dmg dylibbundler gtk+3 librsvg shared-mime-info adwaita-icon-theme
       - name: Install Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.2"
+          go-version: "1.26.5"
           check-latest: true
           cache-dependency-path: |
             go.sum
@@ -52,7 +55,7 @@ jobs:
 
   release:
     name: Release Universal Binary
-    runs-on: macos-15
+    runs-on: macos-14
     needs: build
     steps:
       - name: Check out repository code
@@ -69,14 +72,15 @@ jobs:
       - name: Download ARM Artifact
         uses: actions/download-artifact@v7
         with:
-          name: WiiUDownloader-App-macos-15
+          name: WiiUDownloader-App-macos-14
           path: arm_dist
       - name: Merge Universal Binary
         run: |
           python3 data/merge_universal_app.py "intel_dist" "arm_dist" "out/WiiUDownloader.app"
-      - name: Sign and DMG
+      - name: Sign and Create DMG
         run: |
-          codesign --force --deep --sign - out/WiiUDownloader.app
+          codesign --deep --force --sign - out/WiiUDownloader.app
+
           create-dmg \
            --volname "WiiUDownloader" \
            --window-pos 200 120 \

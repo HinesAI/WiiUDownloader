@@ -445,11 +445,11 @@ func downloadFile(progressReporter ProgressReporter, client *http.Client, downlo
 	return downloadFileWithOptions(context.Background(), progressReporter, client, downloadURL, dstPath, downloadOptions{
 		DoRetries:   doRetries,
 		AllowResume: true,
-		UserAgent:   "WiiUDownloader",
+		UserAgent:   "WiiUDownloader-HinesAI/1.1",
 	})
 }
 
-func DownloadTitle(titleID, outputDirectory string, doDecryption bool, progressReporter ProgressReporter, deleteEncryptedContents bool, client *http.Client) error {
+func DownloadTitle(titleID, outputDirectory string, version int, doDecryption bool, progressReporter ProgressReporter, deleteEncryptedContents bool, client *http.Client, decryptOutputDir string) error {
 	tid, err := strconv.ParseUint(titleID, 16, 64)
 	if err != nil {
 		return err
@@ -476,10 +476,14 @@ func DownloadTitle(titleID, outputDirectory string, doDecryption bool, progressR
 	}
 
 	tmdPath := filepath.Join(outputDir, "title.tmd")
-	if err := downloadFileWithOptions(context.Background(), progressReporter, client, fmt.Sprintf("%s/%s", baseURL, "tmd"), tmdPath, downloadOptions{
+	tmdURL := fmt.Sprintf("%s/tmd", baseURL)
+	if version > 0 {
+		tmdURL = fmt.Sprintf("%s/tmd.%d", baseURL, version)
+	}
+	if err := downloadFileWithOptions(context.Background(), progressReporter, client, tmdURL, tmdPath, downloadOptions{
 		DoRetries:   true,
 		AllowResume: true,
-		UserAgent:   "WiiUDownloader",
+		UserAgent:   "WiiUDownloader-HinesAI/1.1",
 		Validate: func(path string) error {
 			return validateTMDFile(path, tid)
 		},
@@ -504,7 +508,7 @@ func DownloadTitle(titleID, outputDirectory string, doDecryption bool, progressR
 	if err := downloadFileWithOptions(context.Background(), progressReporter, client, fmt.Sprintf("%s/%s", baseURL, "cetk"), tikPath, downloadOptions{
 		DoRetries:   false,
 		AllowResume: true,
-		UserAgent:   "WiiUDownloader",
+		UserAgent:   "WiiUDownloader-HinesAI/1.1",
 		Validate: func(path string) error {
 			return validateTicketFile(path, tmd.TitleID, tmd.TitleVersion)
 		},
@@ -556,7 +560,7 @@ func DownloadTitle(titleID, outputDirectory string, doDecryption bool, progressR
 				ExpectedSize: expectedContentDownloadSize(content),
 				DoRetries:    true,
 				AllowResume:  true,
-				UserAgent:    "WiiUDownloader",
+				UserAgent:    "WiiUDownloader-HinesAI/1.1",
 			}); err != nil {
 				if isCancelled(progressReporter) {
 					return errCancel
@@ -570,7 +574,7 @@ func DownloadTitle(titleID, outputDirectory string, doDecryption bool, progressR
 					ExpectedSize: expectedH3DownloadSize(content),
 					DoRetries:    true,
 					AllowResume:  true,
-					UserAgent:    "WiiUDownloader",
+					UserAgent:    "WiiUDownloader-HinesAI/1.1",
 					Validate: func(path string) error {
 						return verifyH3File(path, content)
 					},
@@ -596,7 +600,11 @@ func DownloadTitle(titleID, outputDirectory string, doDecryption bool, progressR
 	}
 
 	if doDecryption && !isCancelled(progressReporter) {
-		if err := DecryptContents(outputDir, progressReporter, deleteEncryptedContents); err != nil {
+		decryptOut := ""
+		if decryptOutputDir != "" {
+			decryptOut = filepath.Join(decryptOutputDir, filepath.Base(outputDir))
+		}
+		if err := DecryptContents(outputDir, progressReporter, deleteEncryptedContents, decryptOut); err != nil {
 			return err
 		}
 	}

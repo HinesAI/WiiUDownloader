@@ -14,6 +14,7 @@ type DownloadError struct {
 	Error     string
 	TidStr    string
 	ErrorType string
+	Version   int
 }
 
 const (
@@ -308,17 +309,7 @@ func (pw *ProgressWindow) SetStartTime(startTime time.Time) {
 	pw.startTime = startTime
 }
 
-func (pw *ProgressWindow) AddError(title, errorMsg, tidStr string) {
-	pw.errorsMutex.Lock()
-	defer pw.errorsMutex.Unlock()
-	pw.errors = append(pw.errors, DownloadError{
-		Title:  title,
-		Error:  errorMsg,
-		TidStr: tidStr,
-	})
-}
-
-func (pw *ProgressWindow) AddErrorWithType(title, errorMsg, tidStr, errorType string) {
+func (pw *ProgressWindow) AddErrorWithType(title, errorMsg, tidStr, errorType string, version int) {
 	pw.errorsMutex.Lock()
 	defer pw.errorsMutex.Unlock()
 	pw.errors = append(pw.errors, DownloadError{
@@ -326,6 +317,7 @@ func (pw *ProgressWindow) AddErrorWithType(title, errorMsg, tidStr, errorType st
 		Error:     errorMsg,
 		TidStr:    tidStr,
 		ErrorType: errorType,
+		Version:   version,
 	})
 }
 
@@ -348,7 +340,7 @@ func createProgressWindow(parent *gtk.Window) (*ProgressWindow, error) {
 	if err != nil {
 		return nil, err
 	}
-	win.SetTitle("WiiUDownloader - Downloading")
+	win.SetTitle(appDisplayName + " - Downloading")
 	win.SetTypeHint(gdk.WINDOW_TYPE_HINT_DIALOG)
 	win.SetModal(false)
 	if parent != nil {
@@ -360,16 +352,21 @@ func createProgressWindow(parent *gtk.Window) (*ProgressWindow, error) {
 	SetupWindowAccessibility(win, "Download Progress")
 	win.SetDeletable(false)
 
-	box, err := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 5)
+	box, err := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 12)
 	if err != nil {
 		return nil, err
 	}
+	box.SetMarginBottom(18)
+	box.SetMarginEnd(18)
+	box.SetMarginStart(18)
+	box.SetMarginTop(18)
 	win.Add(box)
 
 	gameLabel, err := gtk.LabelNew("")
 	if err != nil {
 		return nil, err
 	}
+	addStyleClass(gameLabel.GetStyleContext, "title")
 	SetupLabelAccessibility(gameLabel, "Game title label")
 	box.PackStart(gameLabel, false, false, 0)
 
@@ -381,28 +378,44 @@ func createProgressWindow(parent *gtk.Window) (*ProgressWindow, error) {
 	progressBar.ToWidget().SetProperty("tooltip-text", "Download progress bar - Shows current download status, speed, and bytes downloaded")
 	box.PackStart(progressBar, false, false, 0)
 
-	cancelButton, err := gtk.ButtonNewWithLabel("Cancel")
+	cancelButton, err := gtk.ButtonNew()
 	if err != nil {
 		return nil, err
 	}
+	cancelIcon := imageFromIconName("process-stop-symbolic", gtk.ICON_SIZE_BUTTON)
+	cancelLabel, _ := gtk.LabelNew("Cancel")
+	cancelBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+	if cancelIcon != nil {
+		cancelBtnBox.PackStart(cancelIcon, false, false, 0)
+	}
+	cancelBtnBox.PackStart(cancelLabel, false, false, 0)
+	cancelBtnBox.SetHAlign(gtk.ALIGN_CENTER)
+	cancelButton.Add(cancelBtnBox)
 	SetupButtonAccessibility(cancelButton, "Stop the current download operation")
-	pauseButton, err := gtk.ButtonNewWithLabel("Pause")
+	addStyleClass(cancelButton.GetStyleContext, "destructive-action")
+
+	pauseButton, err := gtk.ButtonNew()
 	if err != nil {
 		return nil, err
 	}
+	pauseIcon := imageFromIconName("media-playback-pause-symbolic", gtk.ICON_SIZE_BUTTON)
+	pauseLabel, _ := gtk.LabelNew("Pause")
+	pauseBtnBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
+	if pauseIcon != nil {
+		pauseBtnBox.PackStart(pauseIcon, false, false, 0)
+	}
+	pauseBtnBox.PackStart(pauseLabel, false, false, 0)
+	pauseBtnBox.SetHAlign(gtk.ALIGN_CENTER)
+	pauseButton.Add(pauseBtnBox)
 	SetupButtonAccessibility(pauseButton, "Temporarily pause or resume downloads")
 
-	bottomhBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 5)
+	bottomhBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
 	if err != nil {
 		return nil, err
 	}
-	bottomhBox.SetSizeRequest(PROGRESS_MIN_WIDTH, -1)
-	bottomhBox.PackEnd(cancelButton, false, false, 0)
-	bottomhBox.PackEnd(pauseButton, false, false, 0)
-	box.SetMarginBottom(5)
-	box.SetMarginEnd(5)
-	box.SetMarginStart(5)
-	box.SetMarginTop(5)
+	addStyleClass(bottomhBox.GetStyleContext, "linked")
+	bottomhBox.PackStart(pauseButton, true, true, 0)
+	bottomhBox.PackStart(cancelButton, true, true, 0)
 	box.PackEnd(bottomhBox, false, false, 0)
 
 	progressWindow := ProgressWindow{

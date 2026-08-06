@@ -5,6 +5,7 @@
 gtitles.c
 output/
 main
+cmd/main
 *.a
 out/
 log.txt
@@ -20,4 +21,10 @@ WiiUDownloader.icns
 *.cert
 *.tmd
 
-# DELETE BEFORE SHIPPING
+# Local build / packaging artifacts (do not commit)
+dist-windows/
+build-windows/
+*.zip
+WiiUDownloader-Windows*/
+*.AppImage
+*.dmg

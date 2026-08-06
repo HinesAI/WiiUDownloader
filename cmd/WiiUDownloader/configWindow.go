@@ -12,7 +12,7 @@ type ConfigWindow struct {
 
 const (
 	SETTINGS_WINDOW_WIDTH               = 480
-	SETTINGS_WINDOW_HEIGHT              = 320
+	SETTINGS_WINDOW_HEIGHT              = 400
 	SETTINGS_GRID_MIN_WIDTH             = 440
 	SETTINGS_GRID_MARGIN                = 12
 	SETTINGS_FIELD_MARGIN_TOP           = 10
@@ -27,7 +27,7 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	if err != nil {
 		return nil, err
 	}
-	win.SetTitle("WiiUDownloader - Settings")
+	win.SetTitle(appDisplayName + " - Settings")
 	win.SetDecorated(true)
 	win.SetPosition(gtk.WIN_POS_CENTER)
 	win.SetDefaultSize(SETTINGS_WINDOW_WIDTH, SETTINGS_WINDOW_HEIGHT)
@@ -43,11 +43,22 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	mainBox.SetMarginEnd(SETTINGS_GRID_MARGIN)
 	win.Add(mainBox)
 
-	notebook, err := gtk.NotebookNew()
+	stack, err := gtk.StackNew()
 	if err != nil {
 		return nil, err
 	}
-	mainBox.PackStart(notebook, true, true, 0)
+	stack.SetTransitionType(gtk.STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT)
+	stack.SetTransitionDuration(200)
+
+	switcher, err := gtk.StackSwitcherNew()
+	if err != nil {
+		return nil, err
+	}
+	switcher.SetStack(stack)
+	switcher.SetHAlign(gtk.ALIGN_CENTER)
+
+	mainBox.PackStart(switcher, false, false, 0)
+	mainBox.PackStart(stack, true, true, 0)
 
 	// --- General Tab ---
 	generalGrid, err := gtk.GridNew()
@@ -102,8 +113,59 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	SetupCheckButtonAccessibility(rememberPathCheck, "Remember and automatically use the last download location")
 	generalGrid.Attach(rememberPathCheck, 0, 2, 2, 1)
 
-	generalTabLabel, _ := gtk.LabelNew("General")
-	notebook.AppendPage(generalGrid, generalTabLabel)
+	decryptOutputPathLabel, err := gtk.LabelNew("Decrypted Output Path:")
+	if err != nil {
+		return nil, err
+	}
+	decryptOutputPathLabel.SetHAlign(gtk.ALIGN_START)
+	generalGrid.Attach(decryptOutputPathLabel, 0, 3, 2, 1)
+
+	decryptOutputPathEntry, err := gtk.EntryNew()
+	if err != nil {
+		return nil, err
+	}
+	decryptOutputPathEntry.SetText(config.DecryptOutputPath)
+	decryptOutputPathEntry.SetWidthChars(SETTINGS_ENTRY_WIDTH_CHARS)
+	decryptOutputPathEntry.SetHExpand(true)
+	decryptOutputPathEntry.SetPlaceholderText("Same as download location...")
+	SetupEntryAccessibility(decryptOutputPathEntry, "Decrypted output path", "Optional folder where decrypted game files will be saved. Leave empty to save alongside downloads.")
+	generalGrid.Attach(decryptOutputPathEntry, 0, 4, 1, 1)
+
+	decryptOutputPathButton, err := gtk.ButtonNewWithLabel("Browse")
+	if err != nil {
+		return nil, err
+	}
+	SetupButtonAccessibility(decryptOutputPathButton, "Browse for decrypted files output directory")
+	decryptOutputPathButton.Connect("clicked", func() {
+		selectedPath, err := dialog.Directory().Title("Select Decrypted Files Output Path").Browse()
+		if err != nil {
+			return
+		}
+		if selectedPath != "" {
+			decryptOutputPathEntry.SetText(selectedPath)
+		}
+	})
+
+	clearDecryptPathButton, err := gtk.ButtonNewWithLabel("Clear")
+	if err != nil {
+		return nil, err
+	}
+	SetupButtonAccessibility(clearDecryptPathButton, "Clear the decrypted files output path")
+	addStyleClass(clearDecryptPathButton.GetStyleContext, "destructive-action")
+	clearDecryptPathButton.Connect("clicked", func() {
+		decryptOutputPathEntry.SetText("")
+	})
+
+	decryptBtnBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
+	if err != nil {
+		return nil, err
+	}
+	addStyleClass(decryptBtnBox.GetStyleContext, "linked")
+	decryptBtnBox.PackStart(decryptOutputPathButton, true, true, 0)
+	decryptBtnBox.PackStart(clearDecryptPathButton, true, true, 0)
+	generalGrid.Attach(decryptBtnBox, 1, 4, 1, 1)
+
+	stack.AddTitled(generalGrid, "general", "General")
 
 	// --- Downloads Tab ---
 	downloadsGrid, err := gtk.GridNew()
@@ -132,8 +194,7 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	SetupCheckButtonAccessibility(suggestRelatedContentCheck, "Offer related content that matches the same title ID")
 	downloadsGrid.Attach(suggestRelatedContentCheck, 0, 1, 1, 1)
 
-	downloadsTabLabel, _ := gtk.LabelNew("Downloads")
-	notebook.AppendPage(downloadsGrid, downloadsTabLabel)
+	stack.AddTitled(downloadsGrid, "downloads", "Downloads")
 
 	// --- Interface Tab ---
 	interfaceGrid, err := gtk.GridNew()
@@ -154,12 +215,12 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	SetupCheckButtonAccessibility(darkModeCheck, "Enable dark theme for the interface")
 	interfaceGrid.Attach(darkModeCheck, 0, 0, 1, 1)
 
-	showDonationBarCheck, err := gtk.CheckButtonNewWithLabel("Show support nudge")
+	showDonationBarCheck, err := gtk.CheckButtonNewWithLabel("Show donation banner")
 	if err != nil {
 		return nil, err
 	}
 	showDonationBarCheck.SetActive(config.ShowDonationBar)
-	SetupCheckButtonAccessibility(showDonationBarCheck, "Show a small bar at the bottom to support the project")
+	SetupCheckButtonAccessibility(showDonationBarCheck, "Show a small banner at the bottom to support the project")
 	interfaceGrid.Attach(showDonationBarCheck, 0, 1, 1, 1)
 
 	getSizeOnQueueCheck, err := gtk.CheckButtonNewWithLabel("Fetch game size when adding to queue")
@@ -170,8 +231,7 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	SetupCheckButtonAccessibility(getSizeOnQueueCheck, "Automatically calculate game size using TMD file when added to queue")
 	interfaceGrid.Attach(getSizeOnQueueCheck, 0, 2, 1, 1)
 
-	interfaceTabLabel, _ := gtk.LabelNew("Interface")
-	notebook.AppendPage(interfaceGrid, interfaceTabLabel)
+	stack.AddTitled(interfaceGrid, "interface", "Interface")
 
 	// --- Action Buttons ---
 	buttonBox, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 6)
@@ -204,6 +264,7 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 	showDonationBarCheck.Connect("toggled", func() { dirty = true })
 	getSizeOnQueueCheck.Connect("toggled", func() { dirty = true })
 	downloadPathEntry.Connect("changed", func() { dirty = true })
+	decryptOutputPathEntry.Connect("changed", func() { dirty = true })
 
 	saveButton.Connect("clicked", func() {
 		config.DarkMode = darkModeCheck.GetActive()
@@ -225,6 +286,13 @@ func NewConfigWindow(config *Config) (*ConfigWindow, error) {
 		config.SuggestRelatedContent = suggestRelatedContentCheck.GetActive()
 		config.ShowDonationBar = showDonationBarCheck.GetActive()
 		config.GetSizeOnQueue = getSizeOnQueueCheck.GetActive()
+
+		newDecryptPath, getDecryptErr := decryptOutputPathEntry.GetText()
+		if getDecryptErr != nil {
+			ShowErrorDialog(win, getDecryptErr)
+			return
+		}
+		config.DecryptOutputPath = newDecryptPath
 
 		setButtonsSensitive(false, saveButton, closeButton)
 
