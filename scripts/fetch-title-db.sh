@@ -7,11 +7,11 @@ URL="https://napi.v10lator.de/db?t=go"
 OUT="${1:-db.go}"
 
 download() {
-  local extra_flags=()
   if [[ "${1:-}" == "insecure" ]]; then
-    extra_flags=(-k)
+    curl -kfsSL -H "$UA" -o "$OUT" "$URL"
+  else
+    curl -fsSL -H "$UA" -o "$OUT" "$URL"
   fi
-  curl -fsSL "${extra_flags[@]}" -H "$UA" -o "$OUT" "$URL"
 }
 
 if ! download; then
