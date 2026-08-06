@@ -34,8 +34,6 @@ jobs:
           check-latest: true
           cache-dependency-path: |
             go.sum
-      - name: Install Pillow (icon fallback)
-        run: python3 -m pip install --user pillow
       - name: Build
         run: |
           bash scripts/fetch-title-db.sh db.go
