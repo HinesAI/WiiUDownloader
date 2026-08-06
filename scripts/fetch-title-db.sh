@@ -6,32 +6,23 @@ UA="User-Agent: NUSspliBuilder/2.1"
 URL="https://napi.v10lator.de/db?t=go"
 OUT="${1:-db.go}"
 
-download() {
-  if [[ "${1:-}" == "insecure" ]]; then
-    curl -kfsSL -H "$UA" -o "$OUT" "$URL"
-  else
-    curl -fsSL -H "$UA" -o "$OUT" "$URL"
-  fi
-}
-
-if ! download; then
+if ! curl -fsSL -H "$UA" -o "$OUT" "$URL"; then
   echo "WARN: secure download of title DB failed; retrying with TLS verify disabled" >&2
-  download insecure
-fi
-
-# BSD sed (macOS) needs sed -i ''; GNU sed accepts sed -i
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  sed_i() { sed -i '' "$@"; }
-else
-  sed_i() { sed -i "$@"; }
+  curl -kfsSL -H "$UA" -o "$OUT" "$URL"
 fi
 
 if grep -q 'var titleEntry =' "$OUT"; then
-  if grep -q 'type TitleEntry struct' "$OUT"; then
-    sed_i '/type TitleEntry struct/,/}/d' "$OUT"
-  fi
-  sed_i 's/var titleEntry =/func init() { TitleDatabase =/' "$OUT"
-  echo '}' >> "$OUT"
+  tmp="$(mktemp)"
+  # Drop an embedded TitleEntry struct if present, then wrap the slice in init().
+  awk '
+    /type TitleEntry struct/ { skip=1; next }
+    skip && /^[[:space:]]*}[[:space:]]*$/ { skip=0; next }
+    skip { next }
+    { print }
+  ' "$OUT" | sed 's/var titleEntry =/func init() { TitleDatabase =/' >"$tmp"
+  echo '}' >>"$tmp"
+  mv "$tmp" "$OUT"
 fi
 
-echo "Prepared $OUT ($(wc -c < "$OUT") bytes)"
+bytes="$(wc -c <"$OUT" | tr -d ' ')"
+echo "Prepared $OUT ($bytes bytes)"
