@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 
 jobs:
   check:
@@ -28,10 +29,32 @@ jobs:
           ahead=$(grep -E '^upstream_commits_since_base=' upstream-report.txt | tail -1 | cut -d= -f2- || echo 0)
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Upstream check"
+            echo
+            echo "- Status: \`$status\`"
+            echo "- Upstream commits since merge-base: \`$ahead\`"
+            echo
+            echo "<details><summary>Full report</summary>"
+            echo
+            echo '```'
+            cat upstream-report.txt
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-report
+          path: upstream-report.txt
+          if-no-files-found: error
 
       - name: Open or update tracking issue
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.UPSTREAM_CHECK_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           STATUS="${{ steps.compare.outputs.status }}"
           AHEAD="${{ steps.compare.outputs.ahead }}"
@@ -39,7 +62,7 @@ jobs:
           LABEL="upstream-sync"
           REPORT_FILE=upstream-report.txt
 
-          # gh label is unavailable on older CLI; create via API
+          # Prefer API label create (works without `gh label` subcommand)
           gh api --method POST "repos/${{ github.repository }}/labels" \
             -f name="$LABEL" \
             -f color="0052CC" \
@@ -79,7 +102,7 @@ jobs:
 
           EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
           if [[ -z "$EXISTING" ]]; then
-            EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+            EXISTING=$(gh issue list --state open --search "Monthly upstream review in:title" --json number --jq '.[0].number // empty' 2>/dev/null || true)
           fi
           if [[ -n "$EXISTING" ]]; then
             gh issue comment "$EXISTING" --body-file issue-body.md

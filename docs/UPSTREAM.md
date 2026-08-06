@@ -8,7 +8,13 @@ GitHub Actions workflow **Upstream check** runs on the **1st of each month** (an
 
 1. Fetches upstream `main`
 2. Compares against our `HEAD` (merge-base / commit list / diffstat)
-3. Opens or updates a GitHub issue labeled `upstream-sync`
+3. Publishes the report to the Actions job summary + an artifact
+4. Tries to open/update a GitHub issue labeled `upstream-sync`
+
+If issue creation fails with the default Actions token, either:
+
+- Repo **Settings → Actions → General → Workflow permissions → Read and write**, or
+- Add a classic/fine-grained PAT as secret `UPSTREAM_CHECK_TOKEN` with `issues: write`
 
 Locally:
 
